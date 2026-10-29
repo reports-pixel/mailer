@@ -1,0 +1,169 @@
+import { useEffect, useRef, useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { CheckCircle2, FileSearch, FileText, LoaderCircle, Send, TriangleAlert, XCircle } from 'lucide-react';
+import { ApiError, companies, employeesByCompany, sendEmployeePdf } from '../api';
+import { ccValid, createRequestId, employeeMessageTemplate, employeeSubjectTemplate, personalizeTemplate, size } from '../utils/mail';
+import type { Config, Employee } from '../types';
+import CcInput from './CcInput';
+import EmployeeMultiSelect from './EmployeeMultiSelect';
+import LocalFolderPicker, { type PickedFolder } from './LocalFolderPicker';
+
+type Match = Employee & { fileName: string; size: number; file?: File; detail: string };
+type Checked = { key: string; folder: string; ready: Match[]; notFound: Match[]; noEmail: Match[]; invalid: Match[] };
+type Row = { status: 'WAITING' | 'SENDING' | 'SENT' | 'FAILED' | 'UNCERTAIN'; detail: string };
+
+/** Company → users → subject/message → path → Check Mail Format → Send Mail. */
+export default function MailPage({ profile }: { profile: Config }) {
+  const client = useQueryClient();
+  const [company, setCompany] = useState('');
+  const [users, setUsers] = useState<Employee[]>([]);
+  const [subject, setSubject] = useState(employeeSubjectTemplate);
+  const [message, setMessage] = useState(employeeMessageTemplate);
+  const [cc, setCc] = useState(profile.defaultCc);
+  const [folder, setFolder] = useState<PickedFolder | null>(null);
+  const [errors, setErrors] = useState<string[]>([]);
+  const [checking, setChecking] = useState(false);
+  const [checked, setChecked] = useState<Checked | null>(null);
+  const [rows, setRows] = useState<Record<string, Row>>({});
+  const [sending, setSending] = useState(false);
+  const ids = useRef<Record<string, string>>({});
+
+  const companyList = useQuery({ queryKey: ['companies'], queryFn: ({ signal }) => companies(signal), staleTime: 60000 });
+  useEffect(() => {
+    const list = companyList.data?.data;
+    if (!company && list?.length) setCompany(list.find(c => c.code === 'FP')?.code || list[0].code);
+  }, [companyList.data, company]);
+  const employeeList = useQuery({ queryKey: ['employees', company], queryFn: ({ signal }) => employeesByCompany(company, signal), enabled: !!company, staleTime: 60000 });
+
+  // Any change after checking means the preview no longer matches what would be sent.
+  const key = JSON.stringify([users.map(u => u.employeeCode), subject, message, cc, folder?.pickedAt]);
+  const stale = !!checked && checked.key !== key;
+  const done = Object.values(rows).filter(r => r.status === 'SENT' || r.status === 'FAILED' || r.status === 'UNCERTAIN').length;
+  const sent = Object.values(rows).filter(r => r.status === 'SENT').length;
+  const finished = !!checked && !sending && checked.ready.length > 0 && done === checked.ready.length;
+
+  const validate = () => {
+    const found: string[] = [];
+    if (!company) found.push('Company: choose a company.');
+    if (!users.length) found.push('User: select at least one user.');
+    if (!subject.trim()) found.push('Subject: enter a subject.');
+    else if (subject.length > 200) found.push('Subject: keep it under 200 characters.');
+    if (!message.trim()) found.push('Message: enter a message.');
+    if (!folder) found.push('Path: click "Choose folder…" and pick the folder that holds the PDFs.');
+    if (!ccValid(cc)) found.push(`CC: "${cc}" is not a valid list of email addresses separated by commas.`);
+    return found;
+  };
+  const check = async () => {
+    const found = validate(); setErrors(found); setChecked(null); setRows({}); ids.current = {};
+    if (found.length || !folder) return;
+    setChecking(true);
+    // Matched in the browser: each user's <code>.pdf in the chosen folder, checked to be a real PDF within the size limit.
+    const result: Checked = { key, folder: folder.name, ready: [], notFound: [], noEmail: [], invalid: [] };
+    try {
+      for (const user of users) {
+        const fileName = `${user.employeeCode}.pdf`;
+        const file = folder.files.get(fileName.toLowerCase());
+        const match: Match = { ...user, fileName, size: file?.size || 0, file, detail: '' };
+        if (!user.selectable) result.noEmail.push(match);
+        else if (!file) result.notFound.push(match);
+        else if (!file.size) result.invalid.push({ ...match, detail: 'the file is empty.' });
+        else if (file.size > profile.limits.fileBytes) result.invalid.push({ ...match, detail: `larger than ${size(profile.limits.fileBytes)}.` });
+        else if (await file.slice(0, 5).text() !== '%PDF-') result.invalid.push({ ...match, detail: 'not a valid PDF file.' });
+        else result.ready.push(match);
+      }
+      setChecked(result);
+    } catch { setErrors(['Path: the folder could not be read. Choose it again.']); }
+    finally { setChecking(false); }
+  };
+  const sendAll = async () => {
+    if (!checked || stale || sending) return;
+    setSending(true);
+    const start: Record<string, Row> = {};
+    // A retry skips sent mails, and never resends an uncertain one (it may already have been delivered).
+    const keep = (row?: Row) => row?.status === 'SENT' || row?.status === 'UNCERTAIN';
+    for (const m of checked.ready) start[m.employeeCode] = keep(rows[m.employeeCode]) ? rows[m.employeeCode] : { status: 'WAITING', detail: 'Waiting…' };
+    let current = start; setRows(current);
+    const update = (code: string, row: Row) => { current = { ...current, [code]: row }; setRows(current); };
+    for (const m of checked.ready) {
+      if (keep(current[m.employeeCode])) continue;
+      ids.current[m.employeeCode] ||= createRequestId();
+      update(m.employeeCode, { status: 'SENDING', detail: `Sending ${m.fileName} to ${m.email}…` });
+      try {
+        await sendEmployeePdf({ cc, subject, message }, m.employeeCode, m.file!, ids.current[m.employeeCode]);
+        update(m.employeeCode, { status: 'SENT', detail: `Sent to ${m.email}.` });
+      } catch (error) {
+        const uncertain = !(error instanceof ApiError) || error.status === 0 || error.status >= 500 || error.status === 409;
+        update(m.employeeCode, { status: uncertain ? 'UNCERTAIN' : 'FAILED', detail: error instanceof Error ? error.message : 'Not sent.' });
+      }
+    }
+    setSending(false); client.invalidateQueries({ queryKey: ['history'] });
+  };
+
+  // Every reason the Send button is disabled, shown next to it.
+  const blockers: string[] = [];
+  if (!profile.mailEnabled) blockers.push(`Mail server: ${profile.mailStatus.detail}`);
+  if (!checked) blockers.push('Click "Check Mail Format" first.');
+  else if (stale) blockers.push('The form changed after checking. Click "Check Mail Format" again.');
+  else if (!checked.ready.length) blockers.push('No selected user has a PDF in the chosen path.');
+  if (finished) blockers.push(`Finished: ${sent} of ${checked!.ready.length} sent. Click "Check Mail Format" to send again.`);
+  const retryable = finished && Object.values(rows).some(r => r.status === 'FAILED');
+  const canSend = profile.mailEnabled && !!checked && !stale && checked.ready.length > 0 && !sending && (!finished || retryable);
+
+  return <section className="composer mail-page">
+    <div className="composer-heading"><div className="composer-title"><span className="section-icon"><Send size={21}/></span><div><h2>Mail</h2><p>Each selected user receives a separate email with their own PDF.</p></div></div></div>
+    <div className="mail-form">
+      <label htmlFor="mail-company">Company</label>
+      <select id="mail-company" value={company} disabled={sending} onChange={event => { setCompany(event.target.value); setUsers([]); }}>
+        {!companyList.data && <option value="">{companyList.isError ? 'Could not load companies' : 'Loading…'}</option>}
+        {companyList.data?.data.map(c => <option key={c.code} value={c.code}>{c.code} ({c.employees} users)</option>)}
+      </select>
+      <label htmlFor="mail-users">User</label>
+      <div><EmployeeMultiSelect id="mail-users" employees={employeeList.data?.data || []} value={users} onChange={setUsers} disabled={sending || !company} loading={employeeList.isFetching}/>
+        {employeeList.isError && <p className="field-error">{employeeList.error.message}</p>}</div>
+      <label htmlFor="mail-subject">Subject</label>
+      <div><input id="mail-subject" value={subject} maxLength={200} disabled={sending} onChange={event => setSubject(event.target.value.replace(/[\r\n]/g, ''))}/>
+        <p className="hint">{'{}'} becomes the employee code, for example {personalizeTemplate(subject, { employeeCode: 'FP10001', employeeName: '' }, 'employeeCode')}</p></div>
+      <label htmlFor="mail-message">Message</label>
+      <div><textarea id="mail-message" rows={7} value={message} maxLength={50000} disabled={sending} onChange={event => setMessage(event.target.value)}/>
+        <p className="hint">{'{}'} becomes the employee name.</p></div>
+      <label htmlFor="mail-cc">CC</label>
+      <CcInput id="mail-cc" value={cc} disabled={sending} onChange={setCc}/>
+      <span className="mail-form-label">Path</span>
+      <LocalFolderPicker value={folder} disabled={sending} onChange={setFolder}/>
+    </div>
+
+    <div className="mail-actions"><button type="button" className="secondary" disabled={checking || sending} onClick={check}>
+      {checking ? <LoaderCircle className="spin" size={16}/> : <FileSearch size={16}/>}Check Mail Format</button></div>
+
+    {!!errors.length && <div className="validation-list" role="alert"><strong><XCircle size={16}/>Please fix:</strong><ul>{errors.map(e => <li key={e}>{e}</li>)}</ul></div>}
+
+    {checked && <div className={`mail-preview ${stale ? 'stale' : ''}`}>
+      {stale && <p className="banner info"><TriangleAlert size={16}/>The form changed after checking. Click "Check Mail Format" again.</p>}
+      <h3><CheckCircle2 size={17}/>{checked.ready.length} {checked.ready.length === 1 ? 'mail' : 'mails'} ready, PDFs from folder "{checked.folder}"</h3>
+      {checked.ready.map(m => { const row = rows[m.employeeCode]; return <article key={m.employeeCode} className={`mail-card ${row ? row.status.toLowerCase() : ''}`}>
+        <div className="mail-card-head"><span><b>To:</b> {m.employeeCode}-{m.employeeName} &lt;{m.email}&gt;</span>
+          {row && <span className={`status ${row.status === 'SENT' ? 'accepted' : 'uncertain'}`}>{row.status === 'SENDING' && <LoaderCircle className="spin" size={11}/>}{row.status === 'SENT' ? 'Sent' : row.status === 'SENDING' ? 'Sending' : row.status === 'WAITING' ? 'Waiting' : row.status === 'FAILED' ? 'Not sent' : 'Uncertain'}</span>}</div>
+        <p><b>Sub:</b> {personalizeTemplate(subject, m, 'employeeCode')}</p>
+        <p><b>Attachment:</b> <FileText size={13}/> {m.fileName} ({size(m.size)})</p>
+        <p><b>Message:</b></p><pre>{personalizeTemplate(message, m, 'employeeName')}</pre>
+        {row && (row.status === 'FAILED' || row.status === 'UNCERTAIN') && <p className="field-error">{row.detail}</p>}
+      </article>; })}
+      {!!checked.notFound.length && <div className="validation-list"><strong><XCircle size={16}/>PDF not found, these users will not get a mail:</strong>
+        <p>{checked.notFound.map(m => m.employeeCode).join(', ')}. No file named {checked.notFound.map(m => m.fileName).join(', ')} in folder "{checked.folder}".</p></div>}
+      {!!checked.noEmail.length && <div className="validation-list"><strong><XCircle size={16}/>No registered email, will not get a mail:</strong>
+        <p>{checked.noEmail.map(m => m.employeeCode).join(', ')}.</p></div>}
+      {!!checked.invalid.length && <div className="validation-list"><strong><XCircle size={16}/>PDF cannot be used, will not get a mail:</strong>
+        <ul>{checked.invalid.map(m => <li key={m.employeeCode}>{m.fileName}: {m.detail}</li>)}</ul></div>}
+    </div>}
+
+    {(sending || done > 0) && checked && <div className="send-progress" role="status">
+      <div><span>{sending ? `Sending ${Math.min(done + 1, checked.ready.length)} of ${checked.ready.length}…` : `Done: ${sent} sent, ${done - sent} not sent`}</span><span>{Math.round(done / checked.ready.length * 100)}%</span></div>
+      <progress max={checked.ready.length} value={done}/></div>}
+
+    <div className="mail-actions send">
+      {!canSend && !sending && !!blockers.length && <ul className="send-blockers">{blockers.map(b => <li key={b}>{b}</li>)}</ul>}
+      <button type="button" className="primary" disabled={!canSend} onClick={sendAll}>{sending ? <LoaderCircle className="spin" size={16}/> : <Send size={16}/>}
+        {sending ? 'Sending…' : retryable ? 'Retry not sent' : `Send Mail${checked && !stale && checked.ready.length ? ` (${checked.ready.length})` : ''}`}</button>
+    </div>
+  </section>;
+}
