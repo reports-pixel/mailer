@@ -68,11 +68,19 @@ copy .env.example .env                     # then edit
 
 `npm run sync-users` copies the employee API into Turso once (from any PC in the office network).
 
-## Development
+## Development (e.g. from the VS Code terminal)
+
+On the Windows server, open the project folder in VS Code and run in the terminal:
+
+```powershell
+.scriptsDev.ps1            # http://127.0.0.1:6003/  (Ctrl+C to stop)
+```
+
+It uses port 6003, so the service on 6001 keeps running, and loads the saved secrets (needs VS Code started as Administrator). If those cannot be read, put `TURSO_AUTH_TOKEN=...` and `SMTP_PASSWORD=...` in a `.env.local` file (git-ignored). The page reloads by itself when React files in `src/` change; after changing `server/` files press Ctrl+C and run it again.
+
+On any other PC: `npm install`, create `.env` from `.env.example` (plus `.env.local` with the secrets), then `npm run dev`.
 
 ```bash
-npm install
-npm run dev        # API + React with live reload on http://127.0.0.1:6001/
 npm run typecheck
 npm run build      # dist/
 ```

@@ -5,9 +5,9 @@
   "type": "module",
   "description": "KG employee PDF mailer: React page + Node.js server in one application.",
   "scripts": {
-    "dev": "node --env-file-if-exists=.env --watch-path=server server/index.js --dev",
+    "dev": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/index.js --dev",
     "build": "tsc --noEmit && vite build",
-    "start": "node --env-file-if-exists=.env server/index.js",
+    "start": "node --env-file-if-exists=.env --env-file-if-exists=.env.local server/index.js",
     "typecheck": "tsc --noEmit",
     "sync-users": "node --env-file-if-exists=.env scripts/sync-users.js"
   },

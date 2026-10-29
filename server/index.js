@@ -16,7 +16,8 @@ if (dev) {
   // Development: React with live reload from the same Node process; frames allowed to check phone/tablet widths.
   app.set('allowFrames', true);
   const { createServer } = await import('vite');
-  app.use((await createServer({ root, server: { middlewareMode: true }, appType: 'spa' })).middlewares);
+  // Live-reload socket on PORT + 10000, so several dev copies (and the service) never fight over one port.
+  app.use((await createServer({ root, server: { middlewareMode: true, hmr: { host: '127.0.0.1', port: config.port + 10000 } }, appType: 'spa' })).middlewares);
 } else {
   app.use((req, res, next) => { res.set('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"); next(); });
   app.use(express.static(path.join(root, 'dist')));
