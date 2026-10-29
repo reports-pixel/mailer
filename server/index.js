@@ -17,7 +17,7 @@ if (dev) {
   app.set('allowFrames', true);
   const { createServer } = await import('vite');
   // Live-reload socket on PORT + 10000, so several dev copies (and the service) never fight over one port.
-  app.use((await createServer({ root, server: { middlewareMode: true, hmr: { host: '127.0.0.1', port: config.port + 10000 } }, appType: 'spa' })).middlewares);
+  app.use((await createServer({ root, server: { middlewareMode: true, hmr: { host: config.localOnly ? '127.0.0.1' : undefined, port: config.port + 10000 } }, appType: 'spa' })).middlewares);
 } else {
   app.use((req, res, next) => { res.set('Content-Security-Policy', "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'"); next(); });
   app.use(express.static(path.join(root, 'dist')));
