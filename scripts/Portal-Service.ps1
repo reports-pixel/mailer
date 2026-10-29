@@ -30,7 +30,7 @@ function Start-Portal {
     cmd.exe /c "schtasks /Run /TN `"$TaskName`" >nul 2>&1"
     for ($i = 0; $i -lt 60; $i++) {
         Start-Sleep -Seconds 2
-        try { Invoke-WebRequest "${url}api/config" -UseBasicParsing -TimeoutSec 3 | Out-Null; Write-Host "Portal is running: $url"; return } catch { }
+        try { Invoke-WebRequest "${url}api/auth/session" -UseBasicParsing -TimeoutSec 3 | Out-Null; Write-Host "Portal is running: $url"; return } catch { }
     }
     Write-Warning "The portal did not answer yet. Check the logs in $project\logs."
 }
@@ -79,7 +79,12 @@ switch ($Action) {
     'restart'   { Stop-Portal; Start-Portal }
     'status'    {
         if (-not (Test-Installed)) { Write-Host 'Not installed.'; break }
-        try { $config = Invoke-RestMethod "${url}api/config" -TimeoutSec 3; Write-Host "Running at $url"; Write-Host "Sending: $($config.mailStatus.code) - $($config.mailStatus.detail)" }
+        try {
+            Invoke-RestMethod "${url}api/auth/session" -TimeoutSec 3 | Out-Null; Write-Host "Running at $url"
+            # The mail check result is in the newest log (the API itself requires sign-in).
+            $log = Get-ChildItem (Join-Path $project "logs") -Filter "portal-*.log" | Where-Object { $_.Name -notlike "*.err.log" } | Sort-Object LastWriteTime | Select-Object -Last 1
+            if ($log) { Select-String -LiteralPath $log.FullName -Pattern '^\[(mail|users)\]' | Select-Object -Last 2 | ForEach-Object { Write-Host $_.Line } }
+        }
         catch { Write-Host "Installed but not answering. Logs: $project\logs" }
     }
     'uninstall' { Stop-Portal; if (Test-Installed) { schtasks.exe /Delete /TN $TaskName /F | Out-Null }; Write-Host 'Service removed. Saved passwords were kept; data is in Turso.' }
