@@ -73,7 +73,7 @@ copy .env.example .env                     # then edit
 On the Windows server, open the project folder in VS Code and run in the terminal:
 
 ```powershell
-.scriptsDev.ps1            # http://127.0.0.1:6003/  (Ctrl+C to stop)
+.\scripts\Dev.ps1            # http://127.0.0.1:6003/  (Ctrl+C to stop)
 ```
 
 It uses port 6003, so the service on 6001 keeps running, and loads the saved secrets (needs VS Code started as Administrator). If those cannot be read, put `TURSO_AUTH_TOKEN=...` and `SMTP_PASSWORD=...` in a `.env.local` file (git-ignored). The page reloads by itself when React files in `src/` change; after changing `server/` files press Ctrl+C and run it again.
