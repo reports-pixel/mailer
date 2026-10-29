@@ -76,7 +76,7 @@ On the Windows server, open the project folder in VS Code and run in the termina
 .\scripts\Dev.ps1            # http://127.0.0.1:6003/  (Ctrl+C to stop)
 ```
 
-To open it to other PCs on the network (sign-in required), add `-Lan`: `.scriptsDev.ps1 -Lan` → `http://<this-pc-ip>:6003/`; Windows Firewall must allow inbound TCP 6003.
+To open it to other PCs on the network (sign-in required), add `-Lan`: `.\scripts\Dev.ps1 -Lan` → `http://<this-pc-ip>:6003/`; Windows Firewall must allow inbound TCP 6003.
 
 It uses port 6003, so the service on 6001 keeps running, and loads the saved secrets (needs VS Code started as Administrator). If those cannot be read, put `TURSO_AUTH_TOKEN=...` and `SMTP_PASSWORD=...` in a `.env.local` file (git-ignored). The page reloads by itself when React files in `src/` change; after changing `server/` files press Ctrl+C and run it again.
 
