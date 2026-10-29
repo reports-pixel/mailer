@@ -4,7 +4,7 @@ export interface Config {
   sender: string; defaultCc: string; mailEnabled: boolean; pdfFolder: string;
   mailStatus: { ready: boolean; code: string; detail: string; checkedAt: string };
   limits: { files: number; fileBytes: number; totalBytes: number; recipients: number };
-  schedulesEnabled: boolean; users: UserSummary;
+  schedulesEnabled: boolean; users: UserSummary; senders: Sender[];
 }
 export interface UserSummary { total: number; updatedTime: string; canSync: boolean }
 export interface ImportResult { imported: number; withoutEmail: number; updatedTime: string }
@@ -30,3 +30,4 @@ export type ScheduleInput = Omit<Schedule, 'id' | 'updatedTime' | 'nextRun'>;
 export interface ScheduleRun { slot: string; employeeCode: string; status: string; detail: string; fileName: string; requestId: string; runTime: string }
 export interface FolderEntry { name: string; path: string; pdfCount: number }
 export interface FolderListing { path: string; parent: string | null; pdfCount: number; folders: FolderEntry[] }
+export interface Sender { id: string; email: string; isDefault: boolean; builtIn: boolean; updatedTime: string }

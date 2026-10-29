@@ -4,6 +4,7 @@ import { now as timestamp, query } from './db.js';
 import { lookup } from './employees.js';
 import { mailStatus, sendEmployeePdf } from './mail.js';
 import { preview, resolveFolder } from './pdfs.js';
+import { resolve as resolveSender } from './senders.js';
 
 // Daily schedules: at each time on the chosen days, every user gets their own PDF. Uses this server's local time.
 export const DAYS = ['SUN', 'MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT'];
@@ -86,7 +87,8 @@ function requestIdFor(id, slot, code) {
 async function runSlot(s, slot) {
   let matches;
   try {
-    if (!mailStatus().ready) throw new ApiError(503, `Sending was unavailable when this schedule was due. ${mailStatus().detail}`);
+    // Schedules send from the default sender; a saved sender was checked when added, the server-setting one at startup.
+    if ((await resolveSender()).builtIn && !mailStatus().ready) throw new ApiError(503, `Sending was unavailable when this schedule was due. ${mailStatus().detail}`);
     matches = (await preview(s.employee_codes, s.folder)).data;
   } catch (error) {
     for (const code of s.employee_codes) await record(s.id, slot, code, 'NOT_SENT', error.message, `${code}.pdf`, '', '');

@@ -95,7 +95,7 @@ export async function lookup(input, fresh = false) {
     const employee = byCode.get(code);
     if (!employee) issues.push(`${code}: not found in the user list.`);
     else if (!employee.selectable) issues.push(`${code}: no valid registered email address.`);
-    else data.push(view(employee));
+    else data.push(employee);
   }
   return { data, issues };
 }

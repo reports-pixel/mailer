@@ -1,17 +1,11 @@
 import { createHash } from 'node:crypto';
-import nodemailer from 'nodemailer';
 import { ApiError, config, parseCc } from './config.js';
 import { now, query } from './db.js';
 import { lookup } from './employees.js';
 import { checkPdf, readPdf, resolveFolder } from './pdfs.js';
+import { envTransport, resolve as resolveSender } from './senders.js';
 
-const transport = nodemailer.createTransport({
-  host: config.smtp.host, port: config.smtp.port, secure: config.smtp.port === 465, requireTLS: config.smtp.port !== 465,
-  auth: { user: config.smtp.user, pass: config.smtp.password },
-  connectionTimeout: 10000, greetingTimeout: 10000, socketTimeout: 30000,
-});
-
-/** Why sending is (not) available; shown to the user as-is. */
+/** Whether the server-setting sender (SMTP_USER) can send; shown to the user as-is. Saved senders are checked when added. */
 let status = { ready: false, code: 'CHECKING', detail: 'Checking the connection to the mail server…', checkedAt: '' };
 let checking;
 export const mailStatus = () => status;
@@ -30,7 +24,7 @@ export async function verifyMail() {
   else if (!config.smtp.password) result = { ready: false, code: 'NO_PASSWORD', detail: `The Gmail app password has not been set: ${passwordHelp}.` };
   else {
     try {
-      await transport.verify();
+      await envTransport.verify();
       result = { ready: true, code: 'OK', detail: `Connected and signed in to ${where} as ${config.smtp.user}.` };
     } catch (error) {
       result = error.code === 'EAUTH'
@@ -60,10 +54,13 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
  * Sends one message and records it. The request ID makes a repeat of an accepted request return the
  * earlier success instead of sending twice; an interrupted or uncertain send is never repeated automatically.
  */
-export async function submit({ requestId, codes, cc, subject, message, attachments }) {
+export async function submit({ requestId, senderId, codes, cc, subject, message, attachments }) {
   if (!UUID.test(String(requestId || ''))) throw new ApiError(400, 'A valid Idempotency-Key (UUID) header is required.');
-  await ensureMailChecked();
-  if (!status.ready) throw new ApiError(503, `Email not sent. ${status.detail}`);
+  const sender = await resolveSender(senderId);
+  if (sender.builtIn) {
+    await ensureMailChecked();
+    if (!status.ready) throw new ApiError(503, `Email not sent. ${status.detail}`);
+  }
   checkText(subject, message);
   const copy = parseCc(cc);
   const { data, issues } = await lookup(codes, true);
@@ -78,7 +75,7 @@ export async function submit({ requestId, codes, cc, subject, message, attachmen
   const reserved = await query(
     `INSERT INTO email_submission (request_id, fingerprint, subject, submitted_time, status, recipient_count, attachment_count, sender, recipients, cc, employee_codes, attachment_names)
      VALUES ($1, $2, $3, $4, 'SUBMITTING', $5, $6, $7, $8, $9, $10, $11) ON CONFLICT (request_id) DO NOTHING`,
-    [requestId, fingerprint, subject, now(), to.length, attachments.length, config.smtp.user, to.join(', '), finalCc.join(', '),
+    [requestId, fingerprint, subject, now(), to.length, attachments.length, sender.from, to.join(', '), finalCc.join(', '),
       data.map(e => e.employeeCode).join(', '), attachments.map(a => a.filename).join(', ')]);
   if (!reserved.rowCount) {
     const { rows: [previous] } = await query('SELECT fingerprint, status, recipient_count, attachment_count FROM email_submission WHERE request_id = $1', [requestId]);
@@ -88,9 +85,9 @@ export async function submit({ requestId, codes, cc, subject, message, attachmen
   }
   const setStatus = value => query('UPDATE email_submission SET status = $1 WHERE request_id = $2', [value, requestId]);
   try {
-    await transport.sendMail({ from: config.smtp.user, to, cc: finalCc, subject, text: message, attachments });
+    await sender.transport.sendMail({ from: sender.from, to, cc: finalCc, subject, text: message, attachments });
   } catch (error) {
-    if (error.code === 'EAUTH') { await setStatus('SMTP_AUTH_FAILED'); throw new ApiError(502, 'Gmail rejected the sign-in. Check the app password.'); }
+    if (error.code === 'EAUTH') { await setStatus('SMTP_AUTH_FAILED'); throw new ApiError(502, `Gmail rejected the sign-in for ${sender.from}. Check its app password under Settings → Sender accounts.`); }
     await setStatus('UNKNOWN');
     throw new ApiError(502, `The mail server did not confirm this mail (${error.code || 'error'}). It may or may not have been delivered; check History before sending again.`);
   }
@@ -102,7 +99,7 @@ export async function submit({ requestId, codes, cc, subject, message, attachmen
  * One user, one PDF, personalised subject and message. The PDF is either uploaded from the folder chosen in the
  * browser (`file`), or, for schedules on the Windows server, read from a server folder (`folder`, checked against `sha256`).
  */
-export async function sendEmployeePdf({ requestId, employeeCode, cc, subject, message, file, folder, sha256 }) {
+export async function sendEmployeePdf({ requestId, senderId, employeeCode, cc, subject, message, file, folder, sha256 }) {
   checkText(subject, message);
   const { data, issues } = await lookup([employeeCode]);
   if (issues.length) throw new ApiError(400, issues[0]);
@@ -116,7 +113,7 @@ export async function sendEmployeePdf({ requestId, employeeCode, cc, subject, me
     pdf = await readPdf(await resolveFolder(folder), employee.employeeCode);
     if (sha256 && pdf.sha256 !== sha256) throw new ApiError(409, `${pdf.name} changed after it was checked.`);
   }
-  return submit({ requestId, codes: [employee.employeeCode], cc,
+  return submit({ requestId, senderId, codes: [employee.employeeCode], cc,
     subject: personalize(subject, employee, 'employeeCode'), message: personalize(message, employee, 'employeeName'),
     attachments: [{ filename: pdf.name, content: pdf.bytes, contentType: 'application/pdf' }] });
 }

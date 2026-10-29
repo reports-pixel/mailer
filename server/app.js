@@ -4,9 +4,10 @@ import { currentUser, login, logout, requireLogin } from './auth.js';
 import { ApiError, config } from './config.js';
 import { migrate } from './db.js';
 import * as employees from './employees.js';
-import { ensureMailChecked, history, mailStatus, sendEmployeePdf, submit, verifyMail } from './mail.js';
+import { ensureMailChecked, history, mailStatus, sendEmployeePdf, verifyMail } from './mail.js';
 import { browse, preview } from './pdfs.js';
 import * as schedules from './scheduler.js';
+import * as senders from './senders.js';
 import * as settings from './settings.js';
 
 // The API, shared by the Windows service (server/index.js) and Vercel (api/index.js).
@@ -41,12 +42,23 @@ api.use(requireLogin);
 
 api.get('/config', handle(async () => {
   await ensureMailChecked();
-  return { sender: config.smtp.user, defaultCc: await settings.defaultCc(), mailEnabled: mailStatus().ready, mailStatus: mailStatus(), pdfFolder: config.pdfFolder,
-    limits: config.limits, schedulesEnabled: config.schedulesEnabled, users: await employees.summary() };
+  // Sending works when the default sender can send: a saved sender was checked when added; the server-setting one at startup.
+  const senderList = await senders.list();
+  const defaultSender = senderList.find(s => s.isDefault);
+  return { sender: defaultSender?.email || '', senders: senderList, defaultCc: await settings.defaultCc(),
+    mailEnabled: !!defaultSender && (!defaultSender.builtIn || mailStatus().ready),
+    mailStatus: defaultSender && !defaultSender.builtIn ? { ready: true, code: 'OK', detail: `Sending as ${defaultSender.email}.`, checkedAt: '' }
+      : defaultSender ? mailStatus() : { ready: false, code: 'NO_SENDER', detail: 'No sender is set up. Add one under Settings (⚙) → Sender accounts.', checkedAt: '' },
+    pdfFolder: config.pdfFolder, limits: config.limits, schedulesEnabled: config.schedulesEnabled, users: await employees.summary() };
 }));
 api.post('/mail/verify', handle(async () => ({ mailStatus: await verifyMail() })));
 
-// Settings: default CC addresses and mail templates.
+// Settings: sender accounts, default CC addresses and mail templates.
+const senderId = req => { if (!/^[0-9a-f-]{36}$/.test(req.params.id)) throw new ApiError(400, 'Invalid sender.'); return req.params.id; };
+api.get('/senders', handle(async () => ({ data: await senders.list() })));
+api.post('/senders', handle(req => senders.save(req.body)));
+api.post('/senders/:id/default', handle(req => senders.makeDefault(senderId(req))));
+api.post('/senders/:id/delete', handle(req => senders.remove(senderId(req))));
 api.post('/settings/cc', handle(req => settings.saveDefaultCc(req.body?.cc)));
 const templateId = req => { if (!/^[0-9a-f-]{36}$/.test(req.params.id)) throw new ApiError(400, 'Invalid template.'); return req.params.id; };
 api.get('/templates', handle(async () => ({ data: await settings.templates() })));
@@ -66,23 +78,8 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { files: config
 // One user's PDF, uploaded from the folder chosen in the browser.
 api.post('/emails/send-employee-pdf', upload.single('pdf'), handle(req => {
   if (!req.file) throw new ApiError(400, 'The PDF file is missing.');
-  return sendEmployeePdf({ requestId: req.get('Idempotency-Key'), employeeCode: req.body.employeeCode, cc: req.body.cc, subject: req.body.subject,
-    message: req.body.message, file: { name: Buffer.from(req.file.originalname, 'latin1').toString('utf8'), bytes: req.file.buffer } });
-}));
-// Shared email: the same message and uploaded attachments to several users.
-const ALLOWED = { pdf: '%PDF-', png: '\x89PNG', jpg: '\xFF\xD8\xFF', jpeg: '\xFF\xD8\xFF', docx: 'PK\x03\x04', xlsx: 'PK\x03\x04', xls: '\xD0\xCF\x11\xE0', csv: null, txt: null };
-api.post('/emails/send', upload.array('attachments'), handle(req => {
-  const files = req.files || [];
-  if (files.reduce((sum, f) => sum + f.size, 0) > config.limits.totalBytes) throw new ApiError(413, 'Attachments are larger than the combined limit.');
-  const attachments = files.map(file => {
-    const name = Buffer.from(file.originalname, 'latin1').toString('utf8');
-    const ext = name.split('.').pop().toLowerCase();
-    if (!(ext in ALLOWED) || /[\\/:*?"<>|]/.test(name)) throw new ApiError(400, `${name}: this file type is not allowed.`);
-    const signature = ALLOWED[ext];
-    if (signature && file.buffer.subarray(0, signature.length).toString('latin1') !== signature) throw new ApiError(400, `${name}: the contents do not match a .${ext} file.`);
-    return { filename: name, content: file.buffer };
-  });
-  return submit({ requestId: req.get('Idempotency-Key'), codes: employees.codes(req.body.toEmployeeCodes), cc: req.body.cc, subject: req.body.subject, message: req.body.message, attachments });
+  return sendEmployeePdf({ requestId: req.get('Idempotency-Key'), senderId: req.body.senderId || undefined, employeeCode: req.body.employeeCode, cc: req.body.cc,
+    subject: req.body.subject, message: req.body.message, file: { name: Buffer.from(req.file.originalname, 'latin1').toString('utf8'), bytes: req.file.buffer } });
 }));
 api.get('/emails/history', handle(req => {
   const size = Number(req.query.pageSize ?? 20);

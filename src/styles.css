@@ -420,3 +420,8 @@ label { display: block; font-size: .87rem; font-weight: 600; margin-bottom: 6px;
 .template-row small { color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .template-editor { display: grid; gap: 12px; }
 .multi-select-options small.count { color: var(--muted); }
+.sender-form { display: grid; gap: 10px; margin-top: 6px; }
+.secondary.small { min-height: 32px; padding: 4px 10px; font-size: .8rem; }
+.template-row .status { flex-shrink: 0; }
+.paste-toggle { margin-top: 8px; }
+.bulk-entry textarea { min-height: 110px; }

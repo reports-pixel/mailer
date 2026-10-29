@@ -1,4 +1,4 @@
-import type { Employee, HistoryResponse, ImportResult, MailForm, MailTemplate, PdfPlan, RecipientLookup, Schedule, ScheduleInput, ScheduleRun, SearchResponse, Config, FolderListing, UserSummary } from '../types';
+import type { Employee, HistoryResponse, Sender, ImportResult, MailForm, MailTemplate, PdfPlan, RecipientLookup, Schedule, ScheduleInput, ScheduleRun, SearchResponse, Config, FolderListing, UserSummary } from '../types';
 
 const base = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); } }
@@ -42,35 +42,16 @@ export function employeePdfPlan(employeeCodes: string[], folder: string, signal:
   return request<PdfPlan>(`/attachments/employee-pdfs?${params}`, { signal });
 }
 /** Sends one user their PDF, uploaded from the folder chosen in the browser. */
-export async function sendEmployeePdf(form: MailForm, employeeCode: string, pdf: File, id: string) {
+export async function sendEmployeePdf(form: MailForm, employeeCode: string, pdf: File, id: string, senderId: string) {
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 90000);
   const data = new FormData();
-  data.append('employeeCode', employeeCode); data.append('cc', form.cc); data.append('subject', form.subject); data.append('message', form.message);
+  data.append('employeeCode', employeeCode); data.append('senderId', senderId); data.append('cc', form.cc); data.append('subject', form.subject); data.append('message', form.message);
   data.append('pdf', pdf, `${employeeCode}.pdf`);
   try {
     return await request<{ success: boolean; message: string; requestId: string }>('/emails/send-employee-pdf', {
       method: 'POST', signal: controller.signal, headers: { 'X-KG-Portal': '1', 'Idempotency-Key': id }, body: data,
     });
   } finally { clearTimeout(timer); }
-}
-export function send(form: MailForm, codes: string[], files: File[], id: string, progress: (value: number) => void) {
-  return new Promise<{ message: string; requestId: string }>((resolve, reject) => {
-    const data = new FormData(); codes.forEach(code => data.append('toEmployeeCodes', code));
-    data.append('cc', form.cc); data.append('subject', form.subject); data.append('message', form.message);
-    files.forEach(file => data.append('attachments', file));
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', `${base}/api/emails/send`); xhr.timeout = 120000;
-    xhr.setRequestHeader('X-KG-Portal', '1'); xhr.setRequestHeader('Idempotency-Key', id);
-    xhr.upload.onprogress = event => { if (event.lengthComputable) progress(Math.round(event.loaded / event.total * 100)); };
-    xhr.onload = () => {
-      let result; try { result = JSON.parse(xhr.responseText); } catch { result = {}; }
-      if (xhr.status === 401) onSignedOut();
-      if (xhr.status >= 200 && xhr.status < 300) resolve(result);
-      else reject(new ApiError(result.message || 'The send could not be confirmed. Check History before trying again.', xhr.status));
-    };
-    const uncertain = () => reject(new ApiError('Connection lost or timed out. Keep this form unchanged and check History before retrying; the same request ID will be reused.', 0));
-    xhr.onerror = uncertain; xhr.ontimeout = uncertain; xhr.onabort = uncertain; xhr.send(data);
-  });
 }
 export function schedules(signal: AbortSignal) { return request<{ data: Schedule[]; zone: string }>('/schedules', { signal }); }
 export function saveSchedule(input: ScheduleInput, id?: string) {
@@ -92,3 +73,7 @@ export function saveTemplate(template: Pick<MailTemplate, 'name' | 'subject' | '
   return request<{ data: MailTemplate }>(id ? `/templates/${id}` : '/templates', { method: 'POST', headers: json, body: JSON.stringify(template) });
 }
 export function deleteTemplate(id: string) { return request(`/templates/${id}/delete`, { method: 'POST', headers: json }); }
+export function senders() { return request<{ data: Sender[] }>('/senders'); }
+export function saveSender(email: string, password: string, makeDefault: boolean) { return request<{ data: Sender }>('/senders', { method: 'POST', headers: json, body: JSON.stringify({ email, password, makeDefault }) }); }
+export function makeDefaultSender(id: string) { return request(`/senders/${id}/default`, { method: 'POST', headers: json }); }
+export function deleteSender(id: string) { return request(`/senders/${id}/delete`, { method: 'POST', headers: json }); }

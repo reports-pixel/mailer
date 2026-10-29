@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, FileSearch, FileText, LoaderCircle, Send, TriangleAlert, XCircle } from 'lucide-react';
-import { ApiError, companies, employeesByCompany, sendEmployeePdf, templates } from '../api';
-import { ccValid, createRequestId, employeeMessageTemplate, employeeSubjectTemplate, personalizeTemplate, size } from '../utils/mail';
+import { ApiError, companies, employeesByCompany, resolveEmployeeCodes, sendEmployeePdf, templates } from '../api';
+import { ccValid, createRequestId, employeeMessageTemplate, employeeSubjectTemplate, parseEmployeeCodes, personalizeTemplate, size } from '../utils/mail';
 import type { Config, Employee } from '../types';
 import CcInput from './CcInput';
 import CompanyMultiSelect from './CompanyMultiSelect';
@@ -18,6 +18,12 @@ export default function MailPage({ profile }: { profile: Config }) {
   const client = useQueryClient();
   const [selectedCompanies, setSelectedCompanies] = useState<string[] | null>(null);
   const [users, setUsers] = useState<Employee[]>([]);
+  const [senderId, setSenderId] = useState(() => profile.senders.find(s => s.isDefault)?.id || profile.senders[0]?.id || '');
+  // Follow Settings: if the chosen sender is removed, fall back to the default one.
+  useEffect(() => { if (!profile.senders.some(s => s.id === senderId)) setSenderId(profile.senders.find(s => s.isDefault)?.id || profile.senders[0]?.id || ''); }, [profile.senders, senderId]);
+  const sender = profile.senders.find(s => s.id === senderId);
+  const [pasteOpen, setPasteOpen] = useState(false); const [pasteText, setPasteText] = useState('');
+  const [pasteIssues, setPasteIssues] = useState<string[]>([]); const [pasting, setPasting] = useState(false);
   const [templateId, setTemplateId] = useState('');
   const [subject, setSubject] = useState(employeeSubjectTemplate);
   const [message, setMessage] = useState(employeeMessageTemplate);
@@ -38,6 +44,25 @@ export default function MailPage({ profile }: { profile: Config }) {
   const chosen = selectedCompanies ?? (list?.length ? [list.find(c => c.code === 'FP')?.code || list[0].code] : []);
   const changeCompanies = (next: string[]) => { setSelectedCompanies(next); setUsers(current => current.filter(u => !u.company || next.includes(u.company))); };
   const employeeList = useQuery({ queryKey: ['employees', chosen.join(',')], queryFn: ({ signal }) => employeesByCompany(chosen, signal), enabled: chosen.length > 0, staleTime: 60000 });
+  /** Selects the pasted codes (one per line, or separated by commas or spaces) and ticks their companies. */
+  const selectPasted = async () => {
+    const codes = parseEmployeeCodes(pasteText);
+    setPasteIssues([]);
+    if (!codes.length) { setPasteIssues(['Paste user codes such as FP10001, one per line or separated by commas or spaces.']); return; }
+    setPasting(true);
+    try {
+      const result = await resolveEmployeeCodes(codes);
+      const merged = [...users];
+      for (const employee of result.data) if (!merged.some(u => u.employeeCode === employee.employeeCode)) merged.push(employee);
+      const added = merged.length - users.length;
+      const neededCompanies = result.data.map(e => e.company).filter((c): c is string => !!c && !chosen.includes(c));
+      if (neededCompanies.length) setSelectedCompanies([...new Set([...chosen, ...neededCompanies])]);
+      setUsers(merged);
+      setPasteIssues([`${added} of ${codes.length} codes selected.`, ...result.issues]);
+      if (!result.issues.length) { setPasteText(''); setPasteOpen(false); }
+    } catch (error) { setPasteIssues([error instanceof Error ? error.message : 'The codes could not be checked.']); }
+    finally { setPasting(false); }
+  };
   const templateList = useQuery({ queryKey: ['templates'], queryFn: ({ signal }) => templates(signal), staleTime: 60000 });
   const applyTemplate = (id: string) => {
     setTemplateId(id);
@@ -46,7 +71,7 @@ export default function MailPage({ profile }: { profile: Config }) {
   };
 
   // Any change after checking means the preview no longer matches what would be sent.
-  const key = JSON.stringify([users.map(u => u.employeeCode), subject, message, cc, folder?.pickedAt]);
+  const key = JSON.stringify([senderId, users.map(u => u.employeeCode), subject, message, cc, folder?.pickedAt]);
   const stale = !!checked && checked.key !== key;
   const done = Object.values(rows).filter(r => r.status === 'SENT' || r.status === 'FAILED' || r.status === 'UNCERTAIN').length;
   const sent = Object.values(rows).filter(r => r.status === 'SENT').length;
@@ -99,7 +124,7 @@ export default function MailPage({ profile }: { profile: Config }) {
       ids.current[m.employeeCode] ||= createRequestId();
       update(m.employeeCode, { status: 'SENDING', detail: `Sending ${m.fileName} to ${m.email}…` });
       try {
-        await sendEmployeePdf({ cc, subject, message }, m.employeeCode, m.file!, ids.current[m.employeeCode]);
+        await sendEmployeePdf({ cc, subject, message }, m.employeeCode, m.file!, ids.current[m.employeeCode], senderId);
         update(m.employeeCode, { status: 'SENT', detail: `Sent to ${m.email}.` });
       } catch (error) {
         const uncertain = !(error instanceof ApiError) || error.status === 0 || error.status >= 500 || error.status === 409;
@@ -111,7 +136,8 @@ export default function MailPage({ profile }: { profile: Config }) {
 
   // Every reason the Send button is disabled, shown next to it.
   const blockers: string[] = [];
-  if (!profile.mailEnabled) blockers.push(`Mail server: ${profile.mailStatus.detail}`);
+  if (!sender) blockers.push('Sender: add a sender account under Settings (⚙).');
+  else if (sender.isDefault && !profile.mailEnabled) blockers.push(`Sender: ${profile.mailStatus.detail}`);
   if (!checked) blockers.push('Click "Check Mail Format" first.');
   else if (stale) blockers.push('The form changed after checking. Click "Check Mail Format" again.');
   else if (!checked.ready.length) blockers.push('No selected user has a PDF in the chosen path.');
@@ -122,12 +148,25 @@ export default function MailPage({ profile }: { profile: Config }) {
   return <section className="composer mail-page">
     <div className="composer-heading"><div className="composer-title"><span className="section-icon"><Send size={21}/></span><div><h2>Mail</h2><p>Each selected user receives a separate email with their own PDF.</p></div></div></div>
     <div className="mail-form">
+      <label htmlFor="mail-sender">Sender</label>
+      <div><select id="mail-sender" value={senderId} disabled={sending || !profile.senders.length} onChange={event => setSenderId(event.target.value)}>
+        {!profile.senders.length && <option value="">No sender set up</option>}
+        {profile.senders.map(s => <option key={s.id} value={s.id}>{s.email}{s.isDefault ? ' (default)' : ''}</option>)}
+      </select><p className="hint">Sender accounts (email and app password) are managed under Settings (⚙).</p></div>
       <label htmlFor="mail-company">Company</label>
       <div><CompanyMultiSelect id="mail-company" companies={list || []} value={chosen} onChange={changeCompanies} disabled={sending} loading={companyList.isPending}/>
         {companyList.isError && <p className="field-error">{companyList.error.message}</p>}</div>
       <label htmlFor="mail-users">User</label>
       <div><EmployeeMultiSelect id="mail-users" employees={employeeList.data?.data || []} value={users} onChange={setUsers} disabled={sending || !chosen.length} loading={employeeList.isFetching}/>
-        {employeeList.isError && <p className="field-error">{employeeList.error.message}</p>}</div>
+        {employeeList.isError && <p className="field-error">{employeeList.error.message}</p>}
+        <button type="button" className="bulk-toggle paste-toggle" disabled={sending} onClick={() => { setPasteOpen(!pasteOpen); setPasteIssues([]); }}>{pasteOpen ? 'Close' : 'Paste user codes'}</button>
+        {pasteOpen && <div className="bulk-entry">
+          <label htmlFor="mail-paste">Paste user codes</label>
+          <textarea id="mail-paste" rows={5} value={pasteText} disabled={pasting} placeholder={'FP10001\nFP10002\nFP10003\n\nor  FP10001,FP10002,FP10003\nor  FP10001 FP10002 FP10003'} onChange={event => setPasteText(event.target.value)}/>
+          <div><span className="hint">One per line, or separated by commas or spaces. Their companies are ticked automatically.</span>
+            <button type="button" className="secondary" disabled={pasting || !pasteText.trim()} onClick={selectPasted}>{pasting && <LoaderCircle className="spin" size={14}/>}Select these users</button></div>
+        </div>}
+        {!!pasteIssues.length && <div className={pasteIssues.length > 1 ? 'bulk-issues' : 'hint'} role="status">{pasteIssues.map(issue => <p key={issue}>{issue}</p>)}</div>}</div>
       <label htmlFor="mail-template">Template</label>
       <div><select id="mail-template" value={templateId} disabled={sending || !templateList.data} onChange={event => applyTemplate(event.target.value)}>
         <option value="">{templateList.isPending ? 'Loading templates…' : 'Choose a template (optional)'}</option>
