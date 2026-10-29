@@ -380,3 +380,27 @@ label { display: block; font-size: .87rem; font-weight: 600; margin-bottom: 6px;
 /* A label styled as a button around a hidden file input */
 .file-button { margin: 0; cursor: pointer; }
 .file-button:focus-within { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* History table: rows and columns; each row becomes a card on phones */
+.table-wrap { overflow-x: auto; margin: 0 -4px; padding: 0 4px; }
+.history-table { width: 100%; border-collapse: separate; border-spacing: 0; font-size: .86rem; }
+.history-table th { position: sticky; top: 0; padding: 10px 10px; text-align: left; font-size: .74rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; color: var(--muted); background: rgba(255, 255, 255, .85); border-bottom: 1px solid var(--line); white-space: nowrap; }
+.history-table th:first-child { border-radius: 10px 0 0 0; }
+.history-table th:last-child { border-radius: 0 10px 0 0; }
+.history-table td { padding: 10px; vertical-align: top; border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, .45); overflow-wrap: anywhere; }
+.history-table tbody tr:hover td { background: rgba(255, 255, 255, .85); }
+.history-table .col-number { color: var(--faint); width: 36px; }
+.history-table .col-time { white-space: nowrap; }
+.history-table .col-time small { display: block; color: var(--muted); }
+.history-table .col-subject { font-weight: 600; min-width: 150px; }
+.history-table .col-email span { display: block; font-size: .8rem; }
+@media (max-width: 899px) {
+  .table-wrap { overflow: visible; margin: 0; padding: 0; }
+  .history-table, .history-table tbody, .history-table tr, .history-table td { display: block; width: 100%; }
+  .history-table thead { display: none; }
+  .history-table tr { margin-bottom: 10px; padding: 10px 12px; border-radius: 12px; background: var(--glass-strong); border: 1px solid var(--edge); }
+  .history-table td { display: grid; grid-template-columns: 96px minmax(0, 1fr); gap: 8px; padding: 5px 0; border: 0; background: none !important; }
+  .history-table td::before { content: attr(data-label); font-size: .74rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; padding-top: 2px; }
+  .history-table .col-number { display: none; }
+  .history-table .col-time small { display: inline; margin-left: 6px; }
+}
