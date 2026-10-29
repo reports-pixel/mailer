@@ -8,10 +8,18 @@ let cache = { expires: 0, list: [], byCode: new Map() };
 const field = (row, ...names) => names.map(name => String(row?.[name] ?? '').trim()).find(Boolean) || '';
 const toEmployee = r => ({ employeeCode: r.code, employeeName: r.name, email: r.email, selectable: validEmail(r.email), company: r.company });
 
+let refilling;
 async function directory(fresh = false) {
   if (fresh || cache.expires < Date.now()) {
-    const { rows } = await query('SELECT code, name, email, company FROM employee ORDER BY company, length(code), code');
-    const list = rows.map(toEmployee);
+    const read = async () => (await query('SELECT code, name, email, company FROM employee ORDER BY company, length(code), code')).rows.map(toEmployee);
+    let list = await read();
+    // An empty list (e.g. rows deleted in the database) is refilled from the employee API right away on the Windows server.
+    if (!list.length && config.employeeApiUrl && !config.onVercel) {
+      refilling ||= syncFromApi().then(r => console.log(`[users] list was empty; refilled ${r.imported} users from the employee API`))
+        .catch(error => console.error(`[users] list is empty and the refill failed: ${error.message}`)).finally(() => { refilling = undefined; });
+      await refilling;
+      list = await read();
+    }
     cache = { expires: Date.now() + 30000, list, byCode: new Map(list.map(e => [e.employeeCode, e])) };
   }
   return cache;

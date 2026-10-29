@@ -158,7 +158,8 @@ export default function MailPage({ profile }: { profile: Config }) {
       </select><p className="hint">Sender accounts (email and app password) are managed under Settings (⚙).</p></div>
       <label htmlFor="mail-company">Company</label>
       <div><CompanyMultiSelect id="mail-company" companies={list || []} value={chosen} onChange={changeCompanies} disabled={sending} loading={companyList.isPending}/>
-        {companyList.isError && <p className="field-error">{companyList.error.message}</p>}</div>
+        {companyList.isError && <p className="field-error">{companyList.error.message}</p>}
+        {companyList.data && !companyList.data.data.length && <p className="field-error">The user list is empty. Open the Users page and click "Sync from employee API" or import the list.</p>}</div>
       <label htmlFor="mail-users">User</label>
       <div><EmployeeMultiSelect id="mail-users" employees={employeeList.data?.data || []} value={users} onChange={setUsers} disabled={sending || !chosen.length} loading={employeeList.isFetching}/>
         {employeeList.isError && <p className="field-error">{employeeList.error.message}</p>}

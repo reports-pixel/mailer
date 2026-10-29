@@ -454,3 +454,10 @@ label { display: block; font-size: .87rem; font-weight: 600; margin-bottom: 6px;
   .main-area > .page-head { position: sticky; top: 0; z-index: 15; padding: 16px 28px; }
   .main-area > .page-head h1 { font-size: 1.5rem; }
 }
+
+/* History: only the Sent emails table scrolls; the page itself stays put. The heading row stays visible. */
+.history-panel .table-wrap { max-height: calc(100vh - 396px); min-height: 220px; overflow: auto; overscroll-behavior: contain; border-radius: 10px; }
+.history-panel .history-table th { z-index: 2; background: #f3f7f5; }
+@media (max-width: 899px) {
+  .history-panel .table-wrap { max-height: calc(100vh - 360px); overflow-y: auto; padding-right: 4px; }
+}
