@@ -32,7 +32,7 @@ export function syncUsers() { return request<ImportResult>('/users/sync', { meth
 export function searchEmployees(q: string, page: number, signal: AbortSignal) {
   return request<SearchResponse>(`/employees/search?${new URLSearchParams({ q, limit: '20', page: String(page) })}`, { signal });
 }
-export function history(page: number, signal: AbortSignal) { return request<HistoryResponse>(`/emails/history?page=${page}&pageSize=20`, { signal }); }
+export function history(page: number, pageSize: number, signal: AbortSignal) { return request<HistoryResponse>(`/emails/history?page=${page}&pageSize=${pageSize}`, { signal }); }
 export function resolveEmployeeCodes(employeeCodes: string[]) {
   return request<RecipientLookup>('/employees/resolve', { method: 'POST', headers: json, body: JSON.stringify({ employeeCodes }) });
 }
@@ -41,12 +41,12 @@ export function employeePdfPlan(employeeCodes: string[], folder: string, signal:
   const params = new URLSearchParams({ folder }); employeeCodes.forEach(code => params.append('employeeCodes', code));
   return request<PdfPlan>(`/attachments/employee-pdfs?${params}`, { signal });
 }
-/** Sends one user their PDF, uploaded from the folder chosen in the browser. */
-export async function sendEmployeePdf(form: MailForm, employeeCode: string, pdf: File, id: string, senderId: string) {
+/** Sends one user their own files (PDF, Excel, images…), uploaded from the folder chosen in the browser. */
+export async function sendEmployeePdf(form: MailForm, employeeCode: string, files: File[], id: string, senderId: string) {
   const controller = new AbortController(); const timer = setTimeout(() => controller.abort(), 90000);
   const data = new FormData();
   data.append('employeeCode', employeeCode); data.append('senderId', senderId); data.append('cc', form.cc); data.append('subject', form.subject); data.append('message', form.message);
-  data.append('pdf', pdf, `${employeeCode}.pdf`);
+  files.forEach(file => data.append('files', file, file.name));
   try {
     return await request<{ success: boolean; message: string; requestId: string }>('/emails/send-employee-pdf', {
       method: 'POST', signal: controller.signal, headers: { 'X-KG-Portal': '1', 'Idempotency-Key': id }, body: data,

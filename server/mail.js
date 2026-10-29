@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { ApiError, config, parseCc } from './config.js';
 import { now, query } from './db.js';
 import { lookup } from './employees.js';
-import { checkPdf, readPdf, resolveFolder } from './pdfs.js';
+import { belongsTo, bundle, checkFile, readUserFiles, resolveFolder } from './pdfs.js';
 import { envTransport, resolve as resolveSender } from './senders.js';
 
 /** Whether the server-setting sender (SMTP_USER) can send; shown to the user as-is. Saved senders are checked when added. */
@@ -96,33 +96,35 @@ export async function submit({ requestId, senderId, codes, cc, subject, message,
 }
 
 /**
- * One user, one PDF, personalised subject and message. The PDF is either uploaded from the folder chosen in the
- * browser (`file`), or, for schedules on the Windows server, read from a server folder (`folder`, checked against `sha256`).
+ * One user, their own files (PDF, Excel, Word, images, text), personalised subject and message. The files are either
+ * uploaded from the folder chosen in the browser (`files`), or, for schedules on the Windows server, read from a server
+ * folder (`folder`, checked against `sha256`).
  */
-export async function sendEmployeePdf({ requestId, senderId, employeeCode, cc, subject, message, file, folder, sha256 }) {
+export async function sendEmployeePdf({ requestId, senderId, employeeCode, cc, subject, message, files, folder, sha256 }) {
   checkText(subject, message);
   const { data, issues } = await lookup([employeeCode]);
   if (issues.length) throw new ApiError(400, issues[0]);
   const employee = data[0];
-  let pdf;
-  if (file) {
-    const expected = `${employee.employeeCode}.pdf`;
-    if (String(file.name).toLowerCase() !== expected.toLowerCase()) throw new ApiError(400, `The attachment for ${employee.employeeCode} must be named ${expected}.`);
-    pdf = checkPdf(expected, file.bytes);
+  let found;
+  if (files?.length) {
+    const wrong = files.find(f => !belongsTo(f.name, employee.employeeCode));
+    if (wrong) throw new ApiError(400, `${wrong.name} does not belong to ${employee.employeeCode}: its name must start with ${employee.employeeCode}.`);
+    found = bundle(files.map(f => checkFile(String(f.name), f.bytes)));
   } else {
-    pdf = await readPdf(await resolveFolder(folder), employee.employeeCode);
-    if (sha256 && pdf.sha256 !== sha256) throw new ApiError(409, `${pdf.name} changed after it was checked.`);
+    found = await readUserFiles(await resolveFolder(folder), employee.employeeCode);
+    if (sha256 && found.sha256 !== sha256) throw new ApiError(409, `The files for ${employee.employeeCode} changed after they were checked.`);
   }
   return submit({ requestId, senderId, codes: [employee.employeeCode], cc,
     subject: personalize(subject, employee, 'employeeCode'), message: personalize(message, employee, 'employeeName'),
-    attachments: [{ filename: pdf.name, content: pdf.bytes, contentType: 'application/pdf' }] });
+    attachments: found.files.map(f => ({ filename: f.name, content: f.bytes })) });
 }
 
 export async function history(page, pageSize) {
+  const total = Number((await query('SELECT count(*) AS n FROM email_submission')).rows[0].n);
   const { rows } = await query(
     `SELECT request_id, subject, submitted_time, status, recipient_count, attachment_count, sender, recipients, cc, employee_codes, attachment_names
      FROM email_submission ORDER BY submitted_time DESC LIMIT $1 OFFSET $2`, [pageSize + 1, (page - 1) * pageSize]);
   return { data: rows.slice(0, pageSize).map(r => ({ requestId: r.request_id, subject: r.subject, submittedTime: r.submitted_time, status: r.status,
     recipientCount: Number(r.recipient_count), attachmentCount: Number(r.attachment_count), sender: r.sender, recipients: r.recipients, cc: r.cc,
-    employeeCodes: r.employee_codes, attachmentNames: r.attachment_names })), page, hasMore: rows.length > pageSize };
+    employeeCodes: r.employee_codes, attachmentNames: r.attachment_names })), page, pageSize, total, hasMore: rows.length > pageSize };
 }

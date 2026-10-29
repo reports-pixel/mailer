@@ -14,7 +14,7 @@ export interface HistoryEntry {
   recipientCount: number; attachmentCount: number; sender: string; recipients: string; cc: string;
   employeeCodes?: string; attachmentNames?: string;
 }
-export interface HistoryResponse { data: HistoryEntry[]; page: number; hasMore: boolean }
+export interface HistoryResponse { data: HistoryEntry[]; page: number; pageSize: number; total: number; hasMore: boolean }
 export interface MailForm { cc: string; subject: string; message: string }
 export interface PdfMatch {
   employeeCode: string; employeeName: string; email: string; fileName: string; size: number;

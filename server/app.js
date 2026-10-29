@@ -75,15 +75,15 @@ api.get('/employees/search', handle(req => employees.search(req.query.q, Number(
 api.post('/employees/resolve', handle(req => employees.lookup(req.body?.employeeCodes)));
 
 const upload = multer({ storage: multer.memoryStorage(), limits: { files: config.limits.files, fileSize: config.limits.fileBytes, fieldSize: 60000 } });
-// One user's PDF, uploaded from the folder chosen in the browser.
-api.post('/emails/send-employee-pdf', upload.single('pdf'), handle(req => {
-  if (!req.file) throw new ApiError(400, 'The PDF file is missing.');
+// One user's files (PDF, Excel, Word, images, text), uploaded from the folder chosen in the browser.
+api.post('/emails/send-employee-pdf', upload.array('files'), handle(req => {
+  if (!req.files?.length) throw new ApiError(400, 'The file for this user is missing.');
   return sendEmployeePdf({ requestId: req.get('Idempotency-Key'), senderId: req.body.senderId || undefined, employeeCode: req.body.employeeCode, cc: req.body.cc,
-    subject: req.body.subject, message: req.body.message, file: { name: Buffer.from(req.file.originalname, 'latin1').toString('utf8'), bytes: req.file.buffer } });
+    subject: req.body.subject, message: req.body.message, files: req.files.map(f => ({ name: Buffer.from(f.originalname, 'latin1').toString('utf8'), bytes: f.buffer })) });
 }));
 api.get('/emails/history', handle(req => {
-  const size = Number(req.query.pageSize ?? 20);
-  if (!Number.isInteger(size) || size < 1 || size > 30) throw new ApiError(400, 'Invalid page size.');
+  const size = Number(req.query.pageSize ?? 10);
+  if (!Number.isInteger(size) || size < 1 || size > 100) throw new ApiError(400, 'Invalid page size.');
   return history(page(req.query.page), size);
 }));
 

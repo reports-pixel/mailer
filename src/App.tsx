@@ -12,8 +12,8 @@ const Schedules = lazy(() => import('./components/Schedules'));
 const Users = lazy(() => import('./components/Users'));
 type Tab = 'compose' | 'schedules' | 'users' | 'history';
 const pages: Record<Tab, { title: string; text: string }> = {
-  compose: { title: 'Send mail', text: 'Each selected user receives a separate email with their own PDF.' },
-  schedules: { title: 'Daily schedules', text: 'Send the PDFs automatically at set times, once or several times a day.' },
+  compose: { title: 'Send mail', text: 'Each selected user receives a separate email with their own files (PDF, Excel, Word, images, text).' },
+  schedules: { title: 'Daily schedules', text: 'Send the files automatically at set times, once or several times a day.' },
   users: { title: 'Users', text: 'The user list that the Company and User fields are filled from.' },
   history: { title: 'History', text: 'Every email sent from this portal, with its status.' },
 };
@@ -29,7 +29,12 @@ export default function App() {
   if (auth.isPending) return <div className="app-loading"><Brand/><LoaderCircle className="spin"/></div>;
   if (auth.isError) return <div className="app-loading"><Brand/><p className="banner error" role="alert">{auth.error.message}</p><button className="secondary" onClick={() => auth.refetch()}>Try again</button></div>;
   if (!auth.data.username) return <Login onSignedIn={() => { client.removeQueries({ predicate: q => q.queryKey[0] !== 'session' }); auth.refetch(); }}/>;
-  return <Portal username={auth.data.username} onSignOut={async () => { await logout().catch(() => {}); client.clear(); client.setQueryData(['session'], { username: null }); }}/>;
+  // Mark the session signed out first (the screen watches it), then drop everything else that was loaded.
+  return <Portal username={auth.data.username} onSignOut={async () => {
+    await logout().catch(() => {});
+    client.setQueryData(['session'], { username: null });
+    client.removeQueries({ predicate: q => q.queryKey[0] !== 'session' });
+  }}/>;
 }
 
 function Portal({ username, onSignOut }: { username: string; onSignOut: () => void }) {
@@ -44,12 +49,15 @@ function Portal({ username, onSignOut }: { username: string; onSignOut: () => vo
   return <div className="app-shell">
     <aside className="sidebar"><Brand/>
       <nav aria-label="Main navigation">{nav.map(([id, Icon]) => <button key={id} type="button" className={tab === id ? 'nav-item selected' : 'nav-item'} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}><Icon size={18}/><span>{pages[id].title}</span></button>)}</nav>
-      <div className="sidebar-status" title={profile.mailStatus.detail}><span className={`status-dot ${profile.mailEnabled ? 'on' : 'off'}`}/><span><strong>{profile.mailEnabled ? 'Sending on' : 'Sending off'}</strong><small>{profile.sender}</small></span>
-        <button type="button" className="icon-button settings-button" aria-label="Settings: senders, CC and mail templates" title="Settings: senders, CC and mail templates" onClick={() => setSettingsOpen(true)}><Settings size={16}/></button>
-        <button type="button" className="icon-button sign-out" aria-label={`Sign out ${username}`} title={`Sign out (${username})`} onClick={onSignOut}><LogOut size={16}/></button></div>
+      <div className="sidebar-status" title={profile.mailStatus.detail}><span className={`status-dot ${profile.mailEnabled ? 'on' : 'off'}`}/><span><strong>{profile.mailEnabled ? 'Sending on' : 'Sending off'}</strong><small>{profile.sender}</small></span></div>
     </aside>
-    <main className="main-content">
-      <header className="page-head"><h1>{pages[tab].title}</h1><p>{pages[tab].text}</p></header>
+    <div className="main-area">
+      <header className="page-head"><div><h1>{pages[tab].title}</h1><p>{pages[tab].text}</p></div>
+        <div className="top-actions">
+          <button type="button" className="secondary top-button" title="Sender accounts, CC and mail templates" onClick={() => setSettingsOpen(true)}><Settings size={16}/><span>Settings</span></button>
+          <button type="button" className="secondary top-button" title={`Signed in as ${username}`} onClick={onSignOut}><LogOut size={16}/><span>Sign out</span></button>
+        </div></header>
+      <main className="main-content">
       <MailStatusBanner profile={profile}/>
       <div className={tab === 'compose' ? '' : 'hidden'}><Suspense fallback={loading}><MailPage profile={profile}/></Suspense></div>
       {tab === 'users' && <Suspense fallback={loading}><Users/></Suspense>}
@@ -57,6 +65,7 @@ function Portal({ username, onSignOut }: { username: string; onSignOut: () => vo
       {tab === 'history' && <Suspense fallback={loading}><History/></Suspense>}
       {settingsOpen && <Suspense fallback={null}><SettingsDialog profile={profile} onClose={() => setSettingsOpen(false)}/></Suspense>}
       <footer className="main-footer">© {new Date().getFullYear()} KG Girdharlal · Internal use only</footer>
-    </main>
+      </main>
+    </div>
   </div>;
 }

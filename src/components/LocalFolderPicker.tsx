@@ -1,8 +1,9 @@
 import { useRef, useState } from 'react';
 import { FolderOpen, LoaderCircle } from 'lucide-react';
+import { allowedList, isAllowed } from '../utils/files';
 
-/** A folder chosen on the user's own computer: its PDF files by lower-case name. Nothing is uploaded when choosing. */
-export type PickedFolder = { name: string; files: Map<string, File>; pickedAt: number };
+/** A folder chosen on the user's own computer: its sendable files by name. Nothing is uploaded when choosing. */
+export type PickedFolder = { name: string; files: File[]; pickedAt: number };
 
 type DirectoryHandle = { name: string; values(): AsyncIterable<{ kind: string; name: string; getFile(): Promise<File> }> };
 const picker = (window as unknown as { showDirectoryPicker?: (options?: object) => Promise<DirectoryHandle> }).showDirectoryPicker;
@@ -17,9 +18,8 @@ export default function LocalFolderPicker({ value, onChange, disabled }: { value
     try {
       const handle = await picker({ id: 'kg-pdf-folder', mode: 'read' });
       setReading(true);
-      const files = new Map<string, File>();
-      for await (const entry of handle.values())
-        if (entry.kind === 'file' && entry.name.toLowerCase().endsWith('.pdf')) files.set(entry.name.toLowerCase(), await entry.getFile());
+      const files: File[] = [];
+      for await (const entry of handle.values()) if (entry.kind === 'file' && isAllowed(entry.name)) files.push(await entry.getFile());
       onChange({ name: handle.name, files, pickedAt: Date.now() });
     } catch (e) {
       if (!(e instanceof DOMException && e.name === 'AbortError')) setError('The folder could not be read. Choose it again.');
@@ -27,24 +27,24 @@ export default function LocalFolderPicker({ value, onChange, disabled }: { value
   };
   const fromInput = (list: FileList | null) => {
     if (!list?.length) return;
-    // Only PDFs directly inside the chosen folder, not in subfolders.
-    const files = new Map<string, File>();
+    // Only files directly inside the chosen folder, not in subfolders.
+    const files: File[] = [];
     let name = '';
     for (const file of Array.from(list)) {
       const parts = (file.webkitRelativePath || file.name).split('/');
       name ||= parts[0];
-      if (parts.length === 2 && file.name.toLowerCase().endsWith('.pdf')) files.set(file.name.toLowerCase(), file);
+      if (parts.length === 2 && isAllowed(file.name)) files.push(file);
     }
     onChange({ name, files, pickedAt: Date.now() });
   };
   return <div className="local-folder">
     <button type="button" className="folder-choose" disabled={disabled || reading} onClick={choose}>
       {reading ? <LoaderCircle className="spin" size={18}/> : <FolderOpen size={18}/>}
-      <span>{value ? <><strong>{value.name}</strong><small>{value.files.size} PDF {value.files.size === 1 ? 'file' : 'files'} found · click to choose another folder</small></>
+      <span>{value ? <><strong>{value.name}</strong><small>{value.files.length} {value.files.length === 1 ? 'file' : 'files'} found · click to choose another folder</small></>
         : <><strong>Choose folder…</strong><small>Opens your computer's folder picker</small></>}</span>
     </button>
     <input ref={input} type="file" className="sr-only" tabIndex={-1} aria-hidden="true" {...{ webkitdirectory: '', directory: '' }} multiple onChange={event => { fromInput(event.target.files); event.target.value = ''; }}/>
-    <p className="hint">Files must be named &lt;userCode&gt;.pdf, for example FP10001.pdf. Only each user's own PDF is uploaded, when you send.</p>
+    <p className="hint">Name each file after the user code, e.g. FP10001.pdf, FP10001.xlsx or FP10001_salary.png. Types: {allowedList}. A user's files are only uploaded when you send.</p>
     {error && <p className="field-error">{error}</p>}
   </div>;
 }

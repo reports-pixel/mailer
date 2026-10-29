@@ -8,8 +8,9 @@ import CcInput from './CcInput';
 import CompanyMultiSelect from './CompanyMultiSelect';
 import EmployeeMultiSelect from './EmployeeMultiSelect';
 import LocalFolderPicker, { type PickedFolder } from './LocalFolderPicker';
+import { belongsTo, problemWith } from '../utils/files';
 
-type Match = Employee & { fileName: string; size: number; file?: File; detail: string };
+type Match = Employee & { fileName: string; size: number; files: File[]; detail: string };
 type Checked = { key: string; folder: string; ready: Match[]; notFound: Match[]; noEmail: Match[]; invalid: Match[] };
 type Row = { status: 'WAITING' | 'SENDING' | 'SENT' | 'FAILED' | 'UNCERTAIN'; detail: string };
 
@@ -84,7 +85,7 @@ export default function MailPage({ profile }: { profile: Config }) {
     if (!subject.trim()) found.push('Subject: enter a subject.');
     else if (subject.length > 200) found.push('Subject: keep it under 200 characters.');
     if (!message.trim()) found.push('Message: enter a message.');
-    if (!folder) found.push('Path: click "Choose folder…" and pick the folder that holds the PDFs.');
+    if (!folder) found.push('Path: click "Choose folder…" and pick the folder that holds the files.');
     if (!ccValid(cc)) found.push(`CC: "${cc}" is not a valid list of email addresses separated by commas.`);
     return found;
   };
@@ -92,18 +93,20 @@ export default function MailPage({ profile }: { profile: Config }) {
     const found = validate(); setErrors(found); setChecked(null); setRows({}); ids.current = {};
     if (found.length || !folder) return;
     setChecking(true);
-    // Matched in the browser: each user's <code>.pdf in the chosen folder, checked to be a real PDF within the size limit.
+    // Matched in the browser: every file in the chosen folder whose name starts with the user's code (FP10001.pdf,
+    // FP10001.xlsx, FP10001_salary.png…), each checked to really be that type and within the size limits.
     const result: Checked = { key, folder: folder.name, ready: [], notFound: [], noEmail: [], invalid: [] };
     try {
       for (const user of users) {
-        const fileName = `${user.employeeCode}.pdf`;
-        const file = folder.files.get(fileName.toLowerCase());
-        const match: Match = { ...user, fileName, size: file?.size || 0, file, detail: '' };
-        if (!user.selectable) result.noEmail.push(match);
-        else if (!file) result.notFound.push(match);
-        else if (!file.size) result.invalid.push({ ...match, detail: 'the file is empty.' });
-        else if (file.size > profile.limits.fileBytes) result.invalid.push({ ...match, detail: `larger than ${size(profile.limits.fileBytes)}.` });
-        else if (await file.slice(0, 5).text() !== '%PDF-') result.invalid.push({ ...match, detail: 'not a valid PDF file.' });
+        const files = folder.files.filter(f => belongsTo(f.name, user.employeeCode)).sort((a, b) => a.name.localeCompare(b.name));
+        const total = files.reduce((sum, f) => sum + f.size, 0);
+        const match: Match = { ...user, fileName: files.map(f => f.name).join(', ') || `${user.employeeCode}.*`, size: total, files, detail: '' };
+        if (!user.selectable) { result.noEmail.push(match); continue; }
+        if (!files.length) { result.notFound.push(match); continue; }
+        const problems = (await Promise.all(files.map(f => problemWith(f, profile.limits.fileBytes)))).filter(Boolean);
+        if (!problems.length && files.length > profile.limits.files) problems.push(`more than ${profile.limits.files} files.`);
+        if (!problems.length && total > profile.limits.totalBytes) problems.push(`together larger than ${size(profile.limits.totalBytes)}.`);
+        if (problems.length) result.invalid.push({ ...match, detail: problems.join(' ') });
         else result.ready.push(match);
       }
       setChecked(result);
@@ -124,7 +127,7 @@ export default function MailPage({ profile }: { profile: Config }) {
       ids.current[m.employeeCode] ||= createRequestId();
       update(m.employeeCode, { status: 'SENDING', detail: `Sending ${m.fileName} to ${m.email}…` });
       try {
-        await sendEmployeePdf({ cc, subject, message }, m.employeeCode, m.file!, ids.current[m.employeeCode], senderId);
+        await sendEmployeePdf({ cc, subject, message }, m.employeeCode, m.files, ids.current[m.employeeCode], senderId);
         update(m.employeeCode, { status: 'SENT', detail: `Sent to ${m.email}.` });
       } catch (error) {
         const uncertain = !(error instanceof ApiError) || error.status === 0 || error.status >= 500 || error.status === 409;
@@ -140,13 +143,13 @@ export default function MailPage({ profile }: { profile: Config }) {
   else if (sender.isDefault && !profile.mailEnabled) blockers.push(`Sender: ${profile.mailStatus.detail}`);
   if (!checked) blockers.push('Click "Check Mail Format" first.');
   else if (stale) blockers.push('The form changed after checking. Click "Check Mail Format" again.');
-  else if (!checked.ready.length) blockers.push('No selected user has a PDF in the chosen path.');
+  else if (!checked.ready.length) blockers.push('No selected user has a file in the chosen folder.');
   if (finished) blockers.push(`Finished: ${sent} of ${checked!.ready.length} sent. Click "Check Mail Format" to send again.`);
   const retryable = finished && Object.values(rows).some(r => r.status === 'FAILED');
   const canSend = profile.mailEnabled && !!checked && !stale && checked.ready.length > 0 && !sending && (!finished || retryable);
 
   return <section className="composer mail-page">
-    <div className="composer-heading"><div className="composer-title"><span className="section-icon"><Send size={21}/></span><div><h2>Mail</h2><p>Each selected user receives a separate email with their own PDF.</p></div></div></div>
+    <div className="composer-heading"><div className="composer-title"><span className="section-icon"><Send size={21}/></span><div><h2>Mail</h2><p>Each selected user receives a separate email with their own files.</p></div></div></div>
     <div className="mail-form">
       <label htmlFor="mail-sender">Sender</label>
       <div><select id="mail-sender" value={senderId} disabled={sending || !profile.senders.length} onChange={event => setSenderId(event.target.value)}>
@@ -191,20 +194,20 @@ export default function MailPage({ profile }: { profile: Config }) {
 
     {checked && <div className={`mail-preview ${stale ? 'stale' : ''}`}>
       {stale && <p className="banner info"><TriangleAlert size={16}/>The form changed after checking. Click "Check Mail Format" again.</p>}
-      <h3><CheckCircle2 size={17}/>{checked.ready.length} {checked.ready.length === 1 ? 'mail' : 'mails'} ready, PDFs from folder "{checked.folder}"</h3>
+      <h3><CheckCircle2 size={17}/>{checked.ready.length} {checked.ready.length === 1 ? 'mail' : 'mails'} ready, files from folder "{checked.folder}"</h3>
       {checked.ready.map(m => { const row = rows[m.employeeCode]; return <article key={m.employeeCode} className={`mail-card ${row ? row.status.toLowerCase() : ''}`}>
         <div className="mail-card-head"><span><b>To:</b> {m.employeeCode}-{m.employeeName} &lt;{m.email}&gt;</span>
           {row && <span className={`status ${row.status === 'SENT' ? 'accepted' : 'uncertain'}`}>{row.status === 'SENDING' && <LoaderCircle className="spin" size={11}/>}{row.status === 'SENT' ? 'Sent' : row.status === 'SENDING' ? 'Sending' : row.status === 'WAITING' ? 'Waiting' : row.status === 'FAILED' ? 'Not sent' : 'Uncertain'}</span>}</div>
         <p><b>Sub:</b> {personalizeTemplate(subject, m, 'employeeCode')}</p>
-        <p><b>Attachment:</b> <FileText size={13}/> {m.fileName} ({size(m.size)})</p>
+        <p><b>{m.files.length > 1 ? 'Attachments' : 'Attachment'}:</b> <FileText size={13}/> {m.fileName} ({size(m.size)})</p>
         <p><b>Message:</b></p><pre>{personalizeTemplate(message, m, 'employeeName')}</pre>
         {row && (row.status === 'FAILED' || row.status === 'UNCERTAIN') && <p className="field-error">{row.detail}</p>}
       </article>; })}
-      {!!checked.notFound.length && <div className="validation-list"><strong><XCircle size={16}/>PDF not found, these users will not get a mail:</strong>
-        <p>{checked.notFound.map(m => m.employeeCode).join(', ')}. No file named {checked.notFound.map(m => m.fileName).join(', ')} in folder "{checked.folder}".</p></div>}
+      {!!checked.notFound.length && <div className="validation-list"><strong><XCircle size={16}/>No file found, these users will not get a mail:</strong>
+        <p>{checked.notFound.map(m => m.employeeCode).join(', ')}. No file whose name starts with their code in folder "{checked.folder}".</p></div>}
       {!!checked.noEmail.length && <div className="validation-list"><strong><XCircle size={16}/>No registered email, will not get a mail:</strong>
         <p>{checked.noEmail.map(m => m.employeeCode).join(', ')}.</p></div>}
-      {!!checked.invalid.length && <div className="validation-list"><strong><XCircle size={16}/>PDF cannot be used, will not get a mail:</strong>
+      {!!checked.invalid.length && <div className="validation-list"><strong><XCircle size={16}/>File cannot be used, will not get a mail:</strong>
         <ul>{checked.invalid.map(m => <li key={m.employeeCode}>{m.fileName}: {m.detail}</li>)}</ul></div>}
     </div>}
 

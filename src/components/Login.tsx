@@ -16,7 +16,7 @@ export default function Login({ onSignedIn }: { onSignedIn: () => void }) {
   return <main className="login-page">
     <form className="login-card" onSubmit={submit} noValidate>
       <div className="brand"><span className="brand-monogram">KG<span>◆</span></span><span><strong>KG GIRDHARLAL</strong><small>EMPLOYEE EMAIL PORTAL</small></span></div>
-      <div><h1>Sign in</h1><p className="hint">Send each employee their own PDF by email.</p></div>
+      <div><h1>Sign in</h1><p className="hint">Send each employee their own documents by email.</p></div>
       <div><label htmlFor="login-user">Username</label><input id="login-user" autoComplete="username" value={username} onChange={e => setUsername(e.target.value)} autoFocus/></div>
       <div><label htmlFor="login-password">Password</label><input id="login-password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)}/></div>
       {error && <p className="banner error" role="alert"><LockKeyhole size={16}/><span>{error}</span></p>}

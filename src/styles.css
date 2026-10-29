@@ -425,3 +425,32 @@ label { display: block; font-size: .87rem; font-weight: 600; margin-bottom: 6px;
 .template-row .status { flex-shrink: 0; }
 .paste-toggle { margin-top: 8px; }
 .bulk-entry textarea { min-height: 110px; }
+
+/* Settings and Sign out in the top-right corner */
+.page-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.page-head > div:first-child { min-width: 0; }
+.top-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.top-button { min-height: 38px; padding: 7px 12px; font-size: .86rem; }
+@media (max-width: 520px) { .top-button span { display: none; } .top-button { padding: 7px 10px; } }
+
+/* History pagination */
+.table-wrap.loading { opacity: .55; transition: opacity .15s; }
+.pagination { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px 16px; margin-top: 16px; font-size: .86rem; }
+.pagination-info { color: var(--muted); }
+.pagination-pages { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; }
+.page-button { display: inline-grid; place-items: center; min-width: 36px; height: 36px; padding: 0 8px; border-radius: 9px; border: 1px solid var(--edge); background: var(--glass-strong); font-weight: 600; font-size: .85rem; }
+.page-button:hover:not(:disabled) { background: #fff; }
+.page-button.current { background: linear-gradient(135deg, var(--brand), #3f8f78); color: #fff; border-color: transparent; }
+.page-gap { padding: 0 4px; color: var(--faint); }
+.pagination-size { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-weight: 400; color: var(--muted); }
+.pagination-size select { width: auto; min-height: 36px; padding: 4px 8px; }
+@media (max-width: 640px) { .pagination { justify-content: center; } .pagination-info { width: 100%; text-align: center; } }
+
+/* Full-width header: page title on the left, Settings and Sign out in the top-right corner */
+.main-area { min-width: 0; }
+.main-area > .page-head { margin: 0; padding: 14px 16px; border-bottom: 1px solid var(--edge); background: var(--glass-soft); -webkit-backdrop-filter: var(--blur); backdrop-filter: var(--blur); }
+.main-area > .page-head h1 { font-size: 1.3rem; }
+@media (min-width: 900px) {
+  .main-area > .page-head { position: sticky; top: 0; z-index: 15; padding: 16px 28px; }
+  .main-area > .page-head h1 { font-size: 1.5rem; }
+}

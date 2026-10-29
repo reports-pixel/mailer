@@ -1,33 +1,39 @@
 # KG Mail Portal
 
-Sends each selected user their own PDF (`<userCode>.pdf`) by email. One application: a **React** page and a **Node.js** (Express) API, with a **Turso** (libSQL) database. It runs in two places that share the same database:
+Sends each selected user their own documents (`<userCode>.pdf`, `.xlsx`, `.png`…) by email. One application: a **React** page and a **Node.js** (Express) API, with a **Turso** (libSQL) database. It runs in two places that share the same database:
 
 | | Vercel (cloud) | Windows server (office) |
 | --- | --- | --- |
-| Sign in, choose users, preview and send PDFs | ✓ | ✓ |
-| PDF folder | chosen on your own computer in the browser | same |
-| Daily schedules (several times a day) | – | ✓ reads PDFs from a server folder |
+| Sign in, choose users, preview and send files | ✓ | ✓ |
+| File folder | chosen on your own computer in the browser | same |
+| Daily schedules (several times a day) | – | ✓ reads files from a server folder |
 | User list | read from Turso | copies the office employee API into Turso every hour |
 | History | shared | shared |
 
 ## Using the portal
 
-Sign in (default **admin / admin**; change it with `ADMIN_PASSWORD`).
+Sign in (default **admin / admin**; change it with `ADMIN_PASSWORD`). **Settings** and **Sign out** are at the top right.
 
 **Send mail**
 
 | Field | |
 | --- | --- |
-| Company | From `comCode` |
-| User | Multi-select, shown as `FP10001-RAVI KUMAR SHAH` |
+| Sender | Sender account to send from (managed in Settings) |
+| Company | From `comCode`; several can be selected |
+| User | Multi-select, shown as `FP10001-RAVI KUMAR SHAH`; or **Paste user codes** (one per line, or separated by commas or spaces) |
+| Template | Optional saved template that fills Subject and Message |
 | Subject | `{}` becomes the user code: `{}-Attachment` → `FP10001-Attachment` |
 | Message | `{}` becomes the user name: `Dear {},` → `Dear RAVI KUMAR SHAH,` |
 | CC | Type an address, press **Add** or Enter |
-| Path | **Choose folder…** opens your computer's folder picker; files must be named `<userCode>.pdf` |
+| Path | **Choose folder…** opens your computer's folder picker |
 
-**Check Mail Format** previews every mail (subject, attachment, message) and lists users with no PDF. **Send Mail** sends one email per user found, with a progress bar. Only each user's own PDF is uploaded, at send time (max 4 MB per PDF on Vercel). `{employeeCode}`, `{employeeName}` and `{date}` also work.
+**Files:** pdf, xlsx, xls, docx, doc, csv, txt, text, png, jpg, jpeg. A file belongs to a user when its name is the user code, optionally followed by `_`, `-`, a space or `.` and more text: `FP10001.pdf`, `FP10001.xlsx`, `FP10001_salary.png`. All of a user's files go in their one email. Each file's contents must match its extension; if one of a user's files is unusable, that user is not sent and the file is named.
 
-Other pages: **Shared email** (same message and files to several users), **Users** (paste or upload the employee API JSON; the Windows server also syncs it), **Daily schedules** (Windows server) and **History**.
+**Check Mail Format** previews every mail (subject, attachments, message) and lists users with no file. **Send Mail** sends one email per user found, with a progress bar. Only each user's own files are uploaded, at send time (max 4 MB per email on Vercel). `{employeeCode}`, `{employeeName}` and `{date}` also work.
+
+**Settings:** sender accounts (email + Google app password, checked with Gmail and stored encrypted), default CC addresses and mail templates.
+
+Other pages: **Users** (paste or upload the employee API JSON; the Windows server also syncs it), **Daily schedules** (Windows server) and **History** (15 rows per page by default).
 
 A mail the server accepted is never sent twice by a retry; a mail with an uncertain result is never resent automatically.
 
