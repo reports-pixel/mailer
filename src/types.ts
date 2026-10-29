@@ -1,4 +1,5 @@
-export interface Employee { employeeCode: string; employeeName: string; email: string; selectable: boolean }
+export interface Employee { employeeCode: string; employeeName: string; email: string; selectable: boolean; company?: string }
+export interface MailTemplate { id: string; name: string; subject: string; message: string; updatedTime: string }
 export interface Config {
   sender: string; defaultCc: string; mailEnabled: boolean; pdfFolder: string;
   mailStatus: { ready: boolean; code: string; detail: string; checkedAt: string };

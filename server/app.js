@@ -7,6 +7,7 @@ import * as employees from './employees.js';
 import { ensureMailChecked, history, mailStatus, sendEmployeePdf, submit, verifyMail } from './mail.js';
 import { browse, preview } from './pdfs.js';
 import * as schedules from './scheduler.js';
+import * as settings from './settings.js';
 
 // The API, shared by the Windows service (server/index.js) and Vercel (api/index.js).
 const app = express();
@@ -40,10 +41,18 @@ api.use(requireLogin);
 
 api.get('/config', handle(async () => {
   await ensureMailChecked();
-  return { sender: config.smtp.user, defaultCc: config.defaultCc, mailEnabled: mailStatus().ready, mailStatus: mailStatus(), pdfFolder: config.pdfFolder,
+  return { sender: config.smtp.user, defaultCc: await settings.defaultCc(), mailEnabled: mailStatus().ready, mailStatus: mailStatus(), pdfFolder: config.pdfFolder,
     limits: config.limits, schedulesEnabled: config.schedulesEnabled, users: await employees.summary() };
 }));
 api.post('/mail/verify', handle(async () => ({ mailStatus: await verifyMail() })));
+
+// Settings: default CC addresses and mail templates.
+api.post('/settings/cc', handle(req => settings.saveDefaultCc(req.body?.cc)));
+const templateId = req => { if (!/^[0-9a-f-]{36}$/.test(req.params.id)) throw new ApiError(400, 'Invalid template.'); return req.params.id; };
+api.get('/templates', handle(async () => ({ data: await settings.templates() })));
+api.post('/templates', handle(req => settings.saveTemplate(null, req.body)));
+api.post('/templates/:id', handle(req => settings.saveTemplate(templateId(req), req.body)));
+api.post('/templates/:id/delete', handle(req => settings.deleteTemplate(templateId(req))));
 
 api.get('/users', handle(employees.summary));
 api.post('/users/import', handle(req => employees.importUsers(req.body)));

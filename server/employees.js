@@ -62,10 +62,11 @@ export async function companies() {
   for (const e of (await directory()).list) counts.set(e.company, (counts.get(e.company) || 0) + 1);
   return [...counts].sort(([a], [b]) => a.localeCompare(b)).map(([code, employees]) => ({ code, employees }));
 }
+/** Users of one or more companies ("FP" or "FP,DP"), each with its company code. */
 export async function byCompany(company) {
-  const code = String(company || '').trim().toUpperCase();
-  if (!/^[A-Z]{1,10}$/.test(code)) throw new ApiError(400, 'Choose a company.');
-  return (await directory()).list.filter(e => e.company === code).map(view);
+  const codes = [...new Set([].concat(company ?? []).join(',').split(',').map(c => c.trim().toUpperCase()).filter(Boolean))];
+  if (!codes.length || codes.some(code => !/^[A-Z]{1,10}$/.test(code))) throw new ApiError(400, 'Choose at least one company.');
+  return (await directory()).list.filter(e => codes.includes(e.company));
 }
 export async function search(queryText, limit, page) {
   const q = String(queryText || '').trim().toUpperCase();

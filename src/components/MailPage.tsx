@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { CheckCircle2, FileSearch, FileText, LoaderCircle, Send, TriangleAlert, XCircle } from 'lucide-react';
-import { ApiError, companies, employeesByCompany, sendEmployeePdf } from '../api';
+import { ApiError, companies, employeesByCompany, sendEmployeePdf, templates } from '../api';
 import { ccValid, createRequestId, employeeMessageTemplate, employeeSubjectTemplate, personalizeTemplate, size } from '../utils/mail';
 import type { Config, Employee } from '../types';
 import CcInput from './CcInput';
+import CompanyMultiSelect from './CompanyMultiSelect';
 import EmployeeMultiSelect from './EmployeeMultiSelect';
 import LocalFolderPicker, { type PickedFolder } from './LocalFolderPicker';
 
@@ -15,11 +16,14 @@ type Row = { status: 'WAITING' | 'SENDING' | 'SENT' | 'FAILED' | 'UNCERTAIN'; de
 /** Company → users → subject/message → path → Check Mail Format → Send Mail. */
 export default function MailPage({ profile }: { profile: Config }) {
   const client = useQueryClient();
-  const [company, setCompany] = useState('');
+  const [selectedCompanies, setSelectedCompanies] = useState<string[] | null>(null);
   const [users, setUsers] = useState<Employee[]>([]);
+  const [templateId, setTemplateId] = useState('');
   const [subject, setSubject] = useState(employeeSubjectTemplate);
   const [message, setMessage] = useState(employeeMessageTemplate);
   const [cc, setCc] = useState(profile.defaultCc);
+  // When the CC is changed in Settings, the form follows it.
+  useEffect(() => setCc(profile.defaultCc), [profile.defaultCc]);
   const [folder, setFolder] = useState<PickedFolder | null>(null);
   const [errors, setErrors] = useState<string[]>([]);
   const [checking, setChecking] = useState(false);
@@ -29,11 +33,17 @@ export default function MailPage({ profile }: { profile: Config }) {
   const ids = useRef<Record<string, string>>({});
 
   const companyList = useQuery({ queryKey: ['companies'], queryFn: ({ signal }) => companies(signal), staleTime: 60000 });
-  useEffect(() => {
-    const list = companyList.data?.data;
-    if (!company && list?.length) setCompany(list.find(c => c.code === 'FP')?.code || list[0].code);
-  }, [companyList.data, company]);
-  const employeeList = useQuery({ queryKey: ['employees', company], queryFn: ({ signal }) => employeesByCompany(company, signal), enabled: !!company, staleTime: 60000 });
+  // FP is selected at first (or the first company); more can be added like users.
+  const list = companyList.data?.data;
+  const chosen = selectedCompanies ?? (list?.length ? [list.find(c => c.code === 'FP')?.code || list[0].code] : []);
+  const changeCompanies = (next: string[]) => { setSelectedCompanies(next); setUsers(current => current.filter(u => !u.company || next.includes(u.company))); };
+  const employeeList = useQuery({ queryKey: ['employees', chosen.join(',')], queryFn: ({ signal }) => employeesByCompany(chosen, signal), enabled: chosen.length > 0, staleTime: 60000 });
+  const templateList = useQuery({ queryKey: ['templates'], queryFn: ({ signal }) => templates(signal), staleTime: 60000 });
+  const applyTemplate = (id: string) => {
+    setTemplateId(id);
+    const template = templateList.data?.data.find(t => t.id === id);
+    if (template) { setSubject(template.subject); setMessage(template.message); }
+  };
 
   // Any change after checking means the preview no longer matches what would be sent.
   const key = JSON.stringify([users.map(u => u.employeeCode), subject, message, cc, folder?.pickedAt]);
@@ -44,7 +54,7 @@ export default function MailPage({ profile }: { profile: Config }) {
 
   const validate = () => {
     const found: string[] = [];
-    if (!company) found.push('Company: choose a company.');
+    if (!chosen.length) found.push('Company: choose at least one company.');
     if (!users.length) found.push('User: select at least one user.');
     if (!subject.trim()) found.push('Subject: enter a subject.');
     else if (subject.length > 200) found.push('Subject: keep it under 200 characters.');
@@ -113,13 +123,16 @@ export default function MailPage({ profile }: { profile: Config }) {
     <div className="composer-heading"><div className="composer-title"><span className="section-icon"><Send size={21}/></span><div><h2>Mail</h2><p>Each selected user receives a separate email with their own PDF.</p></div></div></div>
     <div className="mail-form">
       <label htmlFor="mail-company">Company</label>
-      <select id="mail-company" value={company} disabled={sending} onChange={event => { setCompany(event.target.value); setUsers([]); }}>
-        {!companyList.data && <option value="">{companyList.isError ? 'Could not load companies' : 'Loading…'}</option>}
-        {companyList.data?.data.map(c => <option key={c.code} value={c.code}>{c.code} ({c.employees} users)</option>)}
-      </select>
+      <div><CompanyMultiSelect id="mail-company" companies={list || []} value={chosen} onChange={changeCompanies} disabled={sending} loading={companyList.isPending}/>
+        {companyList.isError && <p className="field-error">{companyList.error.message}</p>}</div>
       <label htmlFor="mail-users">User</label>
-      <div><EmployeeMultiSelect id="mail-users" employees={employeeList.data?.data || []} value={users} onChange={setUsers} disabled={sending || !company} loading={employeeList.isFetching}/>
+      <div><EmployeeMultiSelect id="mail-users" employees={employeeList.data?.data || []} value={users} onChange={setUsers} disabled={sending || !chosen.length} loading={employeeList.isFetching}/>
         {employeeList.isError && <p className="field-error">{employeeList.error.message}</p>}</div>
+      <label htmlFor="mail-template">Template</label>
+      <div><select id="mail-template" value={templateId} disabled={sending || !templateList.data} onChange={event => applyTemplate(event.target.value)}>
+        <option value="">{templateList.isPending ? 'Loading templates…' : 'Choose a template (optional)'}</option>
+        {templateList.data?.data.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+      </select><p className="hint">Fills in Subject and Message; you can still edit them. Manage templates under Settings (⚙).</p></div>
       <label htmlFor="mail-subject">Subject</label>
       <div><input id="mail-subject" value={subject} maxLength={200} disabled={sending} onChange={event => setSubject(event.target.value.replace(/[\r\n]/g, ''))}/>
         <p className="hint">{'{}'} becomes the employee code, for example {personalizeTemplate(subject, { employeeCode: 'FP10001', employeeName: '' }, 'employeeCode')}</p></div>

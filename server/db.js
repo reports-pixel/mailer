@@ -24,6 +24,9 @@ let migrated;
 export function migrate() {
   migrated ||= (async () => {
     await db().executeMultiple(`
+      CREATE TABLE IF NOT EXISTS app_setting (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+      CREATE TABLE IF NOT EXISTS mail_template (
+        id TEXT PRIMARY KEY, name TEXT NOT NULL, subject TEXT NOT NULL, message TEXT NOT NULL, updated_time TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS employee (
         code TEXT PRIMARY KEY, name TEXT NOT NULL, email TEXT NOT NULL, company TEXT NOT NULL, updated_time TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS email_submission (

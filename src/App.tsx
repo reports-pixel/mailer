@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { CalendarClock, Check, CheckCircle2, Clock3, FileText, Info, LoaderCircle, LockKeyhole, LogOut, Mail, PenLine, Send, ShieldCheck, Users as UsersIcon, X } from 'lucide-react';
+import { CalendarClock, Check, CheckCircle2, Clock3, FileText, Info, LoaderCircle, LockKeyhole, LogOut, Mail, PenLine, Send, Settings, ShieldCheck, Users as UsersIcon, X } from 'lucide-react';
 import { ApiError, config, logout, send, session, whenSignedOut } from './api';
 import Login from './components/Login';
 import RecipientPicker from './components/RecipientPicker';
@@ -12,6 +12,7 @@ import { ccValid, createRequestId } from './utils/mail';
 import type { Employee, MailForm, Config } from './types';
 
 const History = lazy(() => import('./components/History'));
+const SettingsDialog = lazy(() => import('./components/SettingsDialog'));
 const MailPage = lazy(() => import('./components/MailPage'));
 const Schedules = lazy(() => import('./components/Schedules'));
 const Users = lazy(() => import('./components/Users'));
@@ -103,6 +104,7 @@ export default function App() {
 
 function Portal({ username, onSignOut }: { username: string; onSignOut: () => void }) {
   const [tab, setTab] = useState<Tab>('compose');
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const current = useQuery({ queryKey: ['config'], queryFn: config, staleTime: 60000 });
   const profile = current.data;
   if (current.isPending) return <div className="app-loading"><Brand/><LoaderCircle className="spin"/><p>Opening your workspace…</p></div>;
@@ -112,7 +114,7 @@ function Portal({ username, onSignOut }: { username: string; onSignOut: () => vo
   return <div className="app-shell">
     <aside className="sidebar"><Brand/>
       <nav aria-label="Main navigation">{nav.map(([id, Icon]) => <button key={id} type="button" className={tab === id ? 'nav-item selected' : 'nav-item'} aria-current={tab === id ? 'page' : undefined} onClick={() => setTab(id)}><Icon size={18}/><span>{pages[id].title}</span></button>)}</nav>
-      <div className="sidebar-status" title={profile.mailStatus.detail}><span className={`status-dot ${profile.mailEnabled ? 'on' : 'off'}`}/><span><strong>{profile.mailEnabled ? 'Sending on' : 'Sending off'}</strong><small>{profile.sender}</small></span><button type="button" className="icon-button sign-out" aria-label={`Sign out ${username}`} title={`Sign out (${username})`} onClick={onSignOut}><LogOut size={16}/></button></div>
+      <div className="sidebar-status" title={profile.mailStatus.detail}><span className={`status-dot ${profile.mailEnabled ? 'on' : 'off'}`}/><span><strong>{profile.mailEnabled ? 'Sending on' : 'Sending off'}</strong><small>{profile.sender}</small></span><button type="button" className="icon-button settings-button" aria-label="Settings: CC and mail templates" title="Settings: CC and mail templates" onClick={() => setSettingsOpen(true)}><Settings size={16}/></button><button type="button" className="icon-button sign-out" aria-label={`Sign out ${username}`} title={`Sign out (${username})`} onClick={onSignOut}><LogOut size={16}/></button></div>
     </aside>
     <main className="main-content">
       <header className="page-head"><h1>{pages[tab].title}</h1><p>{pages[tab].text}</p></header>
@@ -121,6 +123,7 @@ function Portal({ username, onSignOut }: { username: string; onSignOut: () => vo
       {tab === 'users' && <Suspense fallback={<div className="composer skeleton-list"><i/><i/><i/></div>}><Users/></Suspense>}
       {tab === 'schedules' && <Suspense fallback={<div className="composer skeleton-list"><i/><i/><i/></div>}><Schedules profile={profile}/></Suspense>}
       {tab === 'history' && <Suspense fallback={<div className="composer skeleton-list"><i/><i/><i/></div>}><History/></Suspense>}
+      {settingsOpen && <Suspense fallback={null}><SettingsDialog profile={profile} onClose={() => setSettingsOpen(false)}/></Suspense>}
       <footer className="main-footer">© {new Date().getFullYear()} KG Girdharlal · Internal use only</footer>
     </main>
   </div>;

@@ -1,4 +1,4 @@
-import type { Employee, HistoryResponse, ImportResult, MailForm, PdfPlan, RecipientLookup, Schedule, ScheduleInput, ScheduleRun, SearchResponse, Config, FolderListing, UserSummary } from '../types';
+import type { Employee, HistoryResponse, ImportResult, MailForm, MailTemplate, PdfPlan, RecipientLookup, Schedule, ScheduleInput, ScheduleRun, SearchResponse, Config, FolderListing, UserSummary } from '../types';
 
 const base = (import.meta.env.VITE_API_BASE_URL || '').replace(/\/$/, '');
 export class ApiError extends Error { constructor(message: string, public status: number) { super(message); } }
@@ -83,6 +83,12 @@ export function scheduleRuns(id: string, page: number, signal: AbortSignal) {
 export function verifyMail() { return request<{ mailStatus: Config['mailStatus'] }>('/mail/verify', { method: 'POST', headers: json }); }
 export function listFolders(path: string, signal: AbortSignal) { return request<FolderListing>(`/folders?${new URLSearchParams({ path })}`, { signal }); }
 export function companies(signal: AbortSignal) { return request<{ data: { code: string; employees: number }[] }>('/companies', { signal }); }
-export function employeesByCompany(company: string, signal: AbortSignal) {
-  return request<{ data: Employee[] }>(`/employees?${new URLSearchParams({ company })}`, { signal });
+export function employeesByCompany(companies: string[], signal: AbortSignal) {
+  return request<{ data: Employee[] }>(`/employees?${new URLSearchParams({ company: companies.join(',') })}`, { signal });
 }
+export function saveDefaultCc(cc: string) { return request<{ cc: string }>('/settings/cc', { method: 'POST', headers: json, body: JSON.stringify({ cc }) }); }
+export function templates(signal?: AbortSignal) { return request<{ data: MailTemplate[] }>('/templates', { signal }); }
+export function saveTemplate(template: Pick<MailTemplate, 'name' | 'subject' | 'message'>, id?: string) {
+  return request<{ data: MailTemplate }>(id ? `/templates/${id}` : '/templates', { method: 'POST', headers: json, body: JSON.stringify(template) });
+}
+export function deleteTemplate(id: string) { return request(`/templates/${id}/delete`, { method: 'POST', headers: json }); }
